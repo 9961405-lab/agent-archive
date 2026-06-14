@@ -1,8 +1,20 @@
 from __future__ import annotations
+import re
 import sqlite3
 from agent_archive.models import Conversation
 
 MAX_INDEX_BYTES = 65536
+
+# CJK ranges (Unified Ideographs, Compatibility Ideographs, Hiragana/Katakana).
+# FTS5's default unicode61 tokenizer keeps a whole CJK run as one token, so a
+# short substring query (e.g. a 2-char term) never matches. We space-separate
+# CJK codepoints both at index and query time so each char is its own token and
+# substring queries become phrase queries.
+_CJK = re.compile(r"([㐀-鿿豈-﫿぀-ヿ])")
+
+
+def _segment(text: str) -> str:
+    return _CJK.sub(r" \1 ", text)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -52,7 +64,7 @@ def upsert_conversation(conn, conv: Conversation, md_ref: str) -> None:
         if m.kind == "prose" and m.text:
             text = m.text.encode("utf-8")[:MAX_INDEX_BYTES].decode("utf-8", "ignore")
             conn.execute("INSERT INTO messages_fts (text,conv_id,role) VALUES (?,?,?)",
-                         (text, conv.id, m.role))
+                         (_segment(text), conv.id, m.role))
     conn.commit()
 
 
@@ -60,7 +72,9 @@ def search(conn, query: str, source: str | None = None, project: str | None = No
     sql = ("SELECT DISTINCT c.id AS conv_id, c.source, c.title, c.project, c.md_ref "
            "FROM messages_fts f JOIN conversations c ON c.id=f.conv_id "
            "WHERE messages_fts MATCH ?")
-    args = [query]
+    toks = _segment(query).split()
+    fts_query = '"' + " ".join(toks) + '"' if toks else query
+    args = [fts_query]
     if source:
         sql += " AND c.source=?"; args.append(source)
     if project:
