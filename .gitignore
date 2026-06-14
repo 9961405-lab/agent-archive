@@ -4,3 +4,7 @@ md/
 *.sqlite
 *.sqlite-*
 *.db
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
