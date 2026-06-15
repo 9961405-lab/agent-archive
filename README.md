@@ -37,6 +37,33 @@
 
 档案含密钥/隐私，纯本地、不上云。`raw/ md/ *.sqlite .venv/` 已在 `.gitignore` 中排除。
 
+## 精炼（distill，可选，需第三方 LLM）
+
+把会话提炼成结构化精华卡 + 主题页（写进 distilled/ 与 topics/）。**会把 prose 正文外发第三方 API**——见下方隐私说明。
+
+配置（OpenAI 兼容，任选 DeepSeek / OpenAI / 自建代理）：
+
+    export AGENT_ARCHIVE_LLM_BASE_URL=https://api.deepseek.com/v1
+    export AGENT_ARCHIVE_LLM_API_KEY=sk-xxxx
+    export AGENT_ARCHIVE_LLM_MODEL=deepseek-chat
+
+用法：
+
+    agent-archive distill --dry-run         # 免 key，先看会外发哪些会话 + 脱敏样例
+    agent-archive distill --limit 10 --yes  # 试跑 10 个
+    agent-archive distill --yes             # 全量（顺序，约 15-35 分钟）
+    agent-archive distill --exclude-project /Users/mac/secret --yes   # 排除敏感项目
+    agent-archive topics                    # 重建主题页
+    agent-archive distill-stats             # ok/dropped/error 计数
+
+### 隐私（重要）
+- distill **会把会话 prose 外发**（不发工具输出、发送前脱敏、模型输出回程再脱敏）。
+- 脱敏是尽力而为，**不是保证**；敏感项目用 `--exclude-project` 直接排除。
+- distill **不进每日定时**，只在你手动执行时运行。
+- 软链产物进 Obsidian（可选）：
+      ln -s ~/agent-archive-data/distilled "~/Documents/Obsidian Vault/精华"
+      ln -s ~/agent-archive-data/topics    "~/Documents/Obsidian Vault/主题"
+
 ## 后续（未实现）
 
 Cursor / Devin（需 API token）/ WorkBuddy / 飞书；以及 LLM 摘要、语义检索、同步层。详见 `docs/superpowers/specs/`。
