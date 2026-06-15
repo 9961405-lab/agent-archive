@@ -11,10 +11,12 @@
     <string>agent_archive.cli</string>
     <string>sync</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>AGENT_ARCHIVE_ROOT</key><string>/Users/mac/agent-archive-data</string></dict>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
-  <key>StandardOutPath</key><string>/Users/mac/agent-archive/sync.log</string>
-  <key>StandardErrorPath</key><string>/Users/mac/agent-archive/sync.err</string>
+  <key>StandardOutPath</key><string>/Users/mac/agent-archive-data/sync.log</string>
+  <key>StandardErrorPath</key><string>/Users/mac/agent-archive-data/sync.err</string>
   <key>WorkingDirectory</key><string>/Users/mac/agent-archive</string>
 </dict>
 </plist>
