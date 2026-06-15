@@ -35,3 +35,22 @@ def test_queue_operation_is_ignored(tmp_path):
     c, refs = _ref(tmp_path)
     conv = c.parse(refs[0])
     assert all(m.role != "queue-operation" for m in conv.messages)
+
+def test_title_falls_back_to_assistant_when_no_user_prose(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"我来帮你"}]},"timestamp":"2026-06-14T07:00:00Z","sessionId":"s"}\n',
+        encoding="utf-8")
+    c = ClaudeCollector(root=str(tmp_path))
+    conv = c.parse(next(iter(c.discover())))
+    assert conv.title == "我来帮你"
+
+def test_blank_first_user_does_not_crash(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        '{"type":"user","message":{"role":"user","content":"   "},"timestamp":"2026-06-14T07:00:00Z","sessionId":"s"}\n'
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"回答"}]},"timestamp":"2026-06-14T07:00:01Z","sessionId":"s"}\n',
+        encoding="utf-8")
+    c = ClaudeCollector(root=str(tmp_path))
+    conv = c.parse(next(iter(c.discover())))  # 必须不抛
+    assert conv.title == "回答"

@@ -73,8 +73,11 @@ def search(conn, query: str, source: str | None = None, project: str | None = No
            "FROM messages_fts f JOIN conversations c ON c.id=f.conv_id "
            "WHERE messages_fts MATCH ?")
     toks = _segment(query).split()
-    fts_query = '"' + " ".join(toks) + '"' if toks else query
-    args = [fts_query]
+    if not toks:
+        return []  # 空/纯空白查询：直接返回，避免 FTS5 语法错误
+    # 转义短语内的双引号（"→""），防止用户查询里的引号破坏 FTS 短语
+    phrase = " ".join(toks).replace('"', '""')
+    args = ['"' + phrase + '"']
     if source:
         sql += " AND c.source=?"; args.append(source)
     if project:

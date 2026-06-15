@@ -60,3 +60,19 @@ def test_stats(tmp_path):
     store.upsert_conversation(conn, _conv(), md_ref="m")
     s = store.stats(conn)
     assert s["claude"]["conversations"] == 1
+
+
+def test_search_empty_query_returns_empty(tmp_path):
+    db = tmp_path / "a.sqlite"
+    conn = store.connect(str(db)); store.init_db(conn)
+    store.upsert_conversation(conn, _conv(), md_ref="m")
+    assert store.search(conn, "") == []
+    assert store.search(conn, "   ") == []
+
+
+def test_search_with_quote_does_not_crash(tmp_path):
+    db = tmp_path / "a.sqlite"
+    conn = store.connect(str(db)); store.init_db(conn)
+    store.upsert_conversation(conn, _conv(prose='他说"你好世界"了'), md_ref="m")
+    assert isinstance(store.search(conn, '"'), list)  # 必须不抛
+    assert len(store.search(conn, "你好世界")) == 1

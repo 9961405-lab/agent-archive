@@ -31,7 +31,7 @@ def main(argv=None) -> int:
     if args.cmd == "sync":
         cols = get_collectors(only=args.source)
         res = sync_mod.sync(root, collectors=cols, full=args.full)
-        print(f"synced={res['synced']} skipped={res['skipped']}")
+        print(f"synced={res['synced']} skipped={res['skipped']} failed={res.get('failed', 0)}")
         return 0
 
     conn = store.connect(os.path.join(root, "index.sqlite"))
