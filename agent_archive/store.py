@@ -85,6 +85,19 @@ def search(conn, query: str, source: str | None = None, project: str | None = No
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
+def list_conversations(conn, day: str | None = None, source: str | None = None) -> list[dict]:
+    """按会话列出（用于按天浏览）。day 为 'YYYY-MM-DD' 时只列当天，按起始时间倒序。"""
+    sql = ("SELECT id AS conv_id, source, title, project, started_at, message_count, md_ref "
+           "FROM conversations WHERE 1=1")
+    args: list = []
+    if day:
+        sql += " AND substr(COALESCE(started_at,''),1,10)=?"; args.append(day)
+    if source:
+        sql += " AND source=?"; args.append(source)
+    sql += " ORDER BY started_at DESC, source"
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
 def manifest_get(conn, source: str, src_path: str) -> dict | None:
     r = conn.execute("SELECT src_mtime AS mtime, src_size AS size, content_hash "
                      "FROM manifest WHERE source=? AND src_path=?",

@@ -24,3 +24,17 @@ def test_cli_stats(tmp_path, monkeypatch, capsys):
     cli.main(["--root", root, "sync"])
     assert cli.main(["--root", root, "stats"]) == 0
     assert "claude" in capsys.readouterr().out
+
+def test_cli_day(tmp_path, monkeypatch, capsys):
+    root = _root_with_data(tmp_path, monkeypatch)
+    cli.main(["--root", root, "sync"])
+    # 该 fixture 会话起始日为 2026-06-14
+    assert cli.main(["--root", root, "day", "2026-06-14"]) == 0
+    out = capsys.readouterr().out
+    assert "2026-06-14" in out and "1 个会话" in out and "帮我写个脚本" in out
+
+def test_cli_recent(tmp_path, monkeypatch, capsys):
+    root = _root_with_data(tmp_path, monkeypatch)
+    cli.main(["--root", root, "sync"])
+    assert cli.main(["--root", root, "recent", "30"]) == 0
+    assert "2026-06-14" in capsys.readouterr().out
