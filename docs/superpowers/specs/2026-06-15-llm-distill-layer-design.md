@@ -1,10 +1,12 @@
 # LLM 精炼层（distill）设计文档
 
 Date: 2026-06-15
-Version: v1.2
-Status: 待用户评审
+Version: v1.3
+Status: 已通过 Codex 两轮评审，待实现
 
 > v1.1（自审，G2 经真实数据证实）：候选筛选改结构信号、主题封闭词表、对账清理、`--dry-run`、JSON 剥围栏、成本估算。
+>
+> v1.3（Codex 二轮复核后）：清理 5 处旧语义残留——架构图缓存描述、错误处理段「不缓存」、目标段「消息数过少」、首跑段「<4 消息/200-230」、`native_id` 来源（从 `id` 去 `source:` 前缀），使全文与 v1.2 决策一致，避免实现按旧段落走偏。
 >
 > v1.2（Codex 评审后，7 点已并入并经真实库验证）：①明确 distill 的 prose 来源为 `messages.kind='prose'`（实测已存在该列；附带修正 P1 设计文档 schema 漂移）；②缓存语义定为**每会话只存最新**(PK conv_id)，消除复合键歧义；③失败统一**入库**(`status/attempt_count/last_error_at`)，可重试可统计；④候选改**prose 信号**(user/assistant prose 数 + prose 字符数)而非 message_count，实测候选 224；⑤对账清理**仅删带 `generated_by` 标记**的文件，绝不裸清空目录（防误删 Obsidian 手写）；⑥`--dry-run` 不需 API key、模型**输出再脱敏一次**；⑦JSON **字符串感知括号扫描** + 400 自动降级去 `response_format` 重试。
 
@@ -17,7 +19,7 @@ Status: 待用户评审
 ## 目标（对应用户诉求）
 
 - **按主题分类**：模型给每个会话打主题标签，聚合成「主题页」。
-- **去掉没用的**：只用**结构信号**在调用前过滤（消息数过少、Claude 子代理 `agent-*` 会话、黑名单项目）；**不按标题文本过滤**（会误杀真会话）；其余低价值由模型自标 `drop` + `value` 分判定。
+- **去掉没用的**：调用前只按 **prose 信号** 过滤（prose 轮次过少 / prose 字符数过少、Claude 子代理 `agent-*` 会话、黑名单项目）；**不按标题文本、也不按 message_count 过滤**（前者误杀真会话，后者被 tool 噪声污染）；其余低价值由模型自标 `drop` + `value` 分判定。
 - **做成可沉淀的形式**：每个有价值会话产出一张结构化 Markdown 精华卡。
 - **第三方 API**：不绑厂商，OpenAI 兼容接口，配置式（base_url / key / model）。
 - **增量、可断点续、省钱**：按 `content_hash` 缓存，只处理新增/变化会话；`--limit` 试跑。
@@ -55,7 +57,7 @@ flowchart LR
   SEL --> PB["构造 prompt\n仅 prose + 截断 + 脱敏"]
   PB --> LLM["llm.py\nOpenAI 兼容 client(urllib)\n第三方 API"]
   LLM --> PARSE["解析结构化 JSON\n容错"]
-  PARSE --> ST[("distillations 表\n按 conv_id+hash+model+prompt_ver 缓存")]
+  PARSE --> ST[("distillations 表\n每 conv_id 一条最新结果\nhash/model/prompt_ver 控制跳过/重做")]
   ST --> CARD["精华卡 md\ndistilled/<日期>/"]
   ST --> TOPIC["主题页 md\ntopics/<主题>.md"]
   CARD --> OBS["Obsidian vault"]
@@ -80,7 +82,7 @@ OpenAI 兼容 Chat Completions 客户端，用 `urllib.request` POST。
   - `prose_chars = SUM(LENGTH(text)) WHERE kind='prose'`
   
   **入选条件**：`user_prose >= 1` 且 `assistant_prose >= 1` 且 `prose_chars >= PROSE_MIN_CHARS(默认200)`。
-  **再排除**：Claude 子代理会话（`native_id` 以 `agent-` 开头）、黑名单/`--exclude-project`、已缓存（按上节跳过规则）。
+  **再排除**：Claude 子代理会话（`native_id` 以 `agent-` 开头；P1 `conversations` 表无独立 `native_id` 列，从 `id` 去掉 `source:` 前缀得到，即 SQL `substr(id, instr(id,':')+1)`）、黑名单/`--exclude-project`、已缓存（按上节跳过规则）。
   **绝不按标题文本过滤**（v1.1 已证会误杀）。实测该 prose 信号下候选 **224** 个；`prose_chars` 阈值可拦掉"短但只是寒暄"的会话，又不会因 tool 噪声误留。低价值的最终由模型 `drop/value` 兜底。
   `build_prompt` 可顺手丢掉已知系统开场首句以省 token。
 - `build_prompt(conv, messages) -> (system, user)`：只取 `kind=='prose'` 的消息，按"role: text"拼接，整体截断到 `MAX_PROMPT_CHARS(默认 12000)`（超长取首尾各半，中间省略），调用脱敏 `redact()`。
@@ -169,7 +171,7 @@ distill 跑完自动重建主题页（含对账清理）。产物目录可像 md
 
 - 增量：`distillations.content_hash` 与会话当前 hash 比对，相同跳过；`--full` 忽略缓存重做。
 - 断点续：每会话成功即写库 commit，中断后重跑只补未完成的。
-- 错误隔离：单会话 API/解析失败 → `failed++`、记 `error`、不缓存（下次重试），不中断整轮。
+- 错误隔离：单会话 API/解析失败 → `failed++`、**失败入库 `status='error'`、`attempt_count++`、记 `last_error/last_error_at`**，不中断整轮；未超过 `MAX_ATTEMPTS(默认3)` 时下次运行重新选中重试。
 - 限流：429/5xx 指数退避；`--limit` 控制单次量与花费。
 - 版本化：`prompt_version` 常量；改 prompt 或换 model 时旧缓存自然失效（key 含 model+prompt_ver 比对）。
 
@@ -189,7 +191,7 @@ distill 跑完自动重建主题页（含对账清理）。产物目录可像 md
 
 ## 首跑预期与成本
 
-- 候选数（按新结构筛选，保留了原会被误杀的真会话）：约 **200-230** 个（仅排除 <4 消息与 `agent-*` 子代理）。
+- 候选数（按 prose 信号筛选 `user_prose>=1 且 assistant_prose>=1 且 prose_chars>=200`，再排除 `agent-*` 子代理/黑名单，保留了原会被误杀的真会话）：实测 **224** 个。
 - **顺序执行**（v1 不并发，便于错误隔离与限流）：每会话一次调用 ≈ 3-10 秒 → 首跑约 **15-35 分钟**。并发推迟到将来。
 - token 量：每会话只发 prose 且截断到 `MAX_PROMPT_CHARS`(默认 12000 字符 ≈ 4k token)，输出几百 token → 单会话约 ~5k token；全量 ~1-1.2M token。按主流第三方 model（如 DeepSeek/gpt-4o-mini 级）量级，全量花费很低。
 - 建议先 `distill --limit 10` 试跑看精华卡质量与主题标签是否合理，再全量；`--dry-run` 先审计外发内容。
