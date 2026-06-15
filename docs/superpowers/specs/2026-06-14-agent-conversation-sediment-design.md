@@ -165,6 +165,7 @@ CREATE TABLE messages (
   seq INTEGER NOT NULL,
   role TEXT NOT NULL,
   ts TEXT,
+  kind TEXT,            -- prose | thinking | tool | sidechain（实现中已含；distill 层据此只取 prose）
   text TEXT,
   PRIMARY KEY (conv_id, seq),
   FOREIGN KEY (conv_id) REFERENCES conversations(id)
