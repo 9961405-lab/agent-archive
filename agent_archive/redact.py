@@ -8,7 +8,8 @@ _PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]+"),
     re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
 ]
-_USERPATH = re.compile(r"/Users/[^/\s]+/")
+# 抹用户名段，含末尾无斜杠的裸路径（如 /Users/mac）
+_USERPATH = re.compile(r"/Users/[^/\s]+")
 
 
 def redact(text: str) -> str:
@@ -18,5 +19,5 @@ def redact(text: str) -> str:
     out = text
     for p in _PATTERNS:
         out = p.sub("[REDACTED]", out)
-    out = _USERPATH.sub("/Users/[USER]/", out)
+    out = _USERPATH.sub("/Users/[USER]", out)
     return out

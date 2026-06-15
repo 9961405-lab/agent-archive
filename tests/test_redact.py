@@ -17,5 +17,11 @@ def test_redacts_aws_bearer_email_userpath():
     assert "/Users/[USER]/" in s
 
 
+def test_redacts_bare_userpath_without_trailing_slash():
+    s = redact("工作目录是 /Users/mac（不是项目）")
+    assert "/Users/mac" not in s
+    assert "/Users/[USER]" in s
+
+
 def test_keeps_normal_text():
     assert redact("帮我核对快团团订单，金额对不上") == "帮我核对快团团订单，金额对不上"
