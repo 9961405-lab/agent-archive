@@ -61,3 +61,58 @@ def test_build_prompt_truncates_overlong(tmp_path):
     _, user = build_prompt(c, "claude:big")
     assert "…[中间省略]…" in user
     assert len(user) < MAX_PROMPT_CHARS + 200
+
+import json
+from agent_archive.distill import distill_one, run
+
+def _fake_complete(content):
+    def _c(system, user, **kw):
+        return content
+    return _c
+
+def test_distill_one_ok_redacts_output(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:x", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    payload = json.dumps({"summary":"用户的邮箱是 a@b.com","bullets":["b1"],"decisions":[],
+                          "todos":[],"topics":["电商运营","瞎编"],"value":4,"drop":False})
+    rec = distill_one(c, "claude:x", _fake_complete(payload))
+    assert rec["status"] == "ok"
+    assert "a@b.com" not in rec["summary"]
+    assert json.loads(rec["topics"]) == ["电商运营"]
+    assert rec["redacted"] == 1
+
+def test_distill_one_retries_bad_json_then_succeeds(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:r", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    good = json.dumps({"summary":"s","bullets":["b"],"decisions":[],"todos":[],
+                       "topics":["其他"],"value":3,"drop":False})
+    seq = ["这不是JSON", good]
+    def complete(system, user, **kw):
+        return seq.pop(0)
+    rec = distill_one(c, "claude:r", complete)
+    assert rec["status"] == "ok" and seq == []
+
+def test_distill_one_drop_or_lowvalue(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:y", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    payload = json.dumps({"summary":"s","bullets":[],"decisions":[],"todos":[],
+                          "topics":["其他"],"value":0,"drop":True})
+    rec = distill_one(c, "claude:y", _fake_complete(payload))
+    assert rec["status"] == "dropped"
+
+def test_run_isolates_failures(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:a", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    _add(c, "claude:b", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    good = json.dumps({"summary":"s","bullets":["b"],"decisions":[],"todos":[],
+                       "topics":["其他"],"value":3,"drop":False})
+    calls = {"n": 0}
+    def complete(system, user, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        return good
+    res = run(c, complete, model="m")
+    assert res["failed"] == 1 and res["ok"] == 1
+    errs = c.execute("SELECT COUNT(*) FROM distillations WHERE status='error'").fetchone()[0]
+    assert errs == 1

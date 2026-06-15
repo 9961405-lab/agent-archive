@@ -69,3 +69,53 @@ def build_prompt(conn, conv_id: str):
         f"可选 topics：{TOPICS}。所有文本用中文。"
     )
     return system, body
+
+
+import json
+from agent_archive.llm import extract_json
+from agent_archive.topics import normalize_topics
+from agent_archive import store
+
+
+def distill_one(conn, conv_id: str, complete, model: str = "") -> dict:
+    """对单会话调模型并解析，输出回程脱敏，返回已 upsert 的记录 dict。"""
+    system, user = build_prompt(conn, conv_id)
+    ch = conn.execute("SELECT content_hash FROM conversations WHERE id=?", (conv_id,)).fetchone()[0]
+    raw = complete(system, user, model=model)
+    try:
+        data = extract_json(raw)
+    except ValueError:                            # 坏 JSON：用更强约束重试一次（设计要求）
+        raw2 = complete(system + "\n严格只输出 JSON，不要任何其他文字、不要代码围栏。",
+                        user, model=model)
+        data = extract_json(raw2)                  # 再失败则抛 ValueError，由 run 记 error
+    def _red_list(xs):
+        return [redact(str(x)) for x in (xs or [])]
+    topics = normalize_topics(data.get("topics") or [])
+    dropped = bool(data.get("drop")) or int(data.get("value") or 0) < VALUE_MIN
+    rec = dict(
+        conv_id=conv_id, content_hash=ch, model=model, prompt_version=PROMPT_VERSION,
+        status="dropped" if dropped else "ok",
+        summary=redact(str(data.get("summary") or "")),
+        bullets=json.dumps(_red_list(data.get("bullets")), ensure_ascii=False),
+        decisions=json.dumps(_red_list(data.get("decisions")), ensure_ascii=False),
+        todos=json.dumps(_red_list(data.get("todos")), ensure_ascii=False),
+        topics=json.dumps(topics, ensure_ascii=False),
+        value=int(data.get("value") or 0), redacted=1, last_error=None)
+    store.upsert_distillation(conn, rec)
+    return rec
+
+
+def run(conn, complete, *, model: str = "", limit=None, exclude_projects: tuple = ()) -> dict:
+    cands = select_candidates(conn, model=model, exclude_projects=exclude_projects)
+    if limit:
+        cands = cands[:limit]
+    res = {"ok": 0, "dropped": 0, "failed": 0, "skipped": 0}
+    for cv in cands:
+        try:
+            rec = distill_one(conn, cv["id"], complete, model=model)
+            res["ok" if rec["status"] == "ok" else "dropped"] += 1
+        except Exception as e:                    # 每会话隔离：入库 error，可重试
+            ch = cv["content_hash"]
+            store.record_distill_error(conn, cv["id"], ch, model, PROMPT_VERSION, str(e)[:500])
+            res["failed"] += 1
+    return res
