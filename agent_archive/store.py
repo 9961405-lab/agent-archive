@@ -34,6 +34,19 @@ CREATE TABLE IF NOT EXISTS manifest (
   src_size INTEGER, content_hash TEXT, last_synced_at TEXT,
   PRIMARY KEY (source, src_path)
 );
+CREATE TABLE IF NOT EXISTS distillations (
+  conv_id TEXT PRIMARY KEY,
+  content_hash TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  status TEXT NOT NULL,
+  summary TEXT, bullets TEXT, decisions TEXT, todos TEXT,
+  topics TEXT, value INTEGER,
+  redacted INTEGER NOT NULL DEFAULT 0,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT, last_error_at TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 
@@ -118,4 +131,65 @@ def stats(conn) -> dict:
     for r in conn.execute("SELECT source, COUNT(*) c, SUM(message_count) m "
                           "FROM conversations GROUP BY source"):
         out[r["source"]] = {"conversations": r["c"], "messages": r["m"] or 0}
+    return out
+
+
+import datetime as _dt
+
+
+def _now():
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+
+def upsert_distillation(conn, rec: dict) -> None:
+    now = _now()
+    conn.execute(
+        "INSERT INTO distillations "
+        "(conv_id,content_hash,model,prompt_version,status,summary,bullets,decisions,todos,"
+        " topics,value,redacted,attempt_count,last_error,last_error_at,created_at,updated_at) "
+        "VALUES (:conv_id,:content_hash,:model,:prompt_version,:status,:summary,:bullets,"
+        ":decisions,:todos,:topics,:value,:redacted,0,:last_error,NULL,:now,:now) "
+        "ON CONFLICT(conv_id) DO UPDATE SET "
+        "content_hash=excluded.content_hash, model=excluded.model, "
+        "prompt_version=excluded.prompt_version, status=excluded.status, summary=excluded.summary, "
+        "bullets=excluded.bullets, decisions=excluded.decisions, todos=excluded.todos, "
+        "topics=excluded.topics, value=excluded.value, redacted=excluded.redacted, "
+        "last_error=excluded.last_error, updated_at=excluded.updated_at",
+        {**rec, "now": now})
+    conn.commit()
+
+
+def record_distill_error(conn, conv_id, content_hash, model, prompt_version, err) -> None:
+    now = _now()
+    conn.execute(
+        "INSERT INTO distillations "
+        "(conv_id,content_hash,model,prompt_version,status,attempt_count,last_error,last_error_at,"
+        " created_at,updated_at) "
+        "VALUES (?,?,?,?, 'error', 1, ?, ?, ?, ?) "
+        "ON CONFLICT(conv_id) DO UPDATE SET status='error', "
+        "attempt_count=distillations.attempt_count+1, last_error=excluded.last_error, "
+        "last_error_at=excluded.last_error_at, content_hash=excluded.content_hash, "
+        "model=excluded.model, prompt_version=excluded.prompt_version, updated_at=excluded.updated_at",
+        (conv_id, content_hash, model, prompt_version, err, now, now, now))
+    conn.commit()
+
+
+def get_distillation(conn, conv_id) -> dict | None:
+    r = conn.execute("SELECT * FROM distillations WHERE conv_id=?", (conv_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def distillations_by_topic(conn, topic) -> list[dict]:
+    rows = conn.execute(
+        "SELECT d.*, c.title, c.started_at, c.md_ref FROM distillations d "
+        "JOIN conversations c ON c.id=d.conv_id "
+        "WHERE d.status='ok' AND d.topics LIKE ? ORDER BY c.started_at DESC",
+        (f'%"{topic}"%',)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def distill_stats(conn) -> dict:
+    out = {"ok": 0, "dropped": 0, "error": 0}
+    for status, n in conn.execute("SELECT status, COUNT(*) FROM distillations GROUP BY status"):
+        out[status] = n
     return out
