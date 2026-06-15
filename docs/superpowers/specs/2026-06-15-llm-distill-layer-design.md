@@ -1,8 +1,10 @@
 # LLM 精炼层（distill）设计文档
 
 Date: 2026-06-15
-Version: v1.0
+Version: v1.1
 Status: 待用户评审
+
+> v1.1 变更（自审，G2 经真实数据证实）：候选筛选改用**结构信号**（消息数 + 子代理会话），不再按标题文本误杀真会话（实测 86 个"(无标题)"中 61 个 ≥15 消息是真会话）；主题改**封闭受控词表**防碎片化；渲染加**对账清理**陈旧卡片；脱敏诚实声明残余风险并加 `--dry-run` 审计；JSON 解析加剥围栏/抓首个 `{…}`；补花费/耗时估算与中文输出约定。
 
 依赖：建于已完成的[沉淀层 P1](2026-06-14-agent-conversation-sediment-design.md) 之上。本层只读 P1 产出的 `conversations`/`messages`，不改采集逻辑。
 
@@ -13,7 +15,7 @@ Status: 待用户评审
 ## 目标（对应用户诉求）
 
 - **按主题分类**：模型给每个会话打主题标签，聚合成「主题页」。
-- **去掉没用的**：噪声会话（无标题子代理 / 系统注入开场 / 过短）在调用前就过滤；模型还可对低价值会话自标 `drop`。
+- **去掉没用的**：只用**结构信号**在调用前过滤（消息数过少、Claude 子代理 `agent-*` 会话、黑名单项目）；**不按标题文本过滤**（会误杀真会话）；其余低价值由模型自标 `drop` + `value` 分判定。
 - **做成可沉淀的形式**：每个有价值会话产出一张结构化 Markdown 精华卡。
 - **第三方 API**：不绑厂商，OpenAI 兼容接口，配置式（base_url / key / model）。
 - **增量、可断点续、省钱**：按 `content_hash` 缓存，只处理新增/变化会话；`--limit` 试跑。
@@ -61,13 +63,14 @@ OpenAI 兼容 Chat Completions 客户端，用 `urllib.request` POST。
 - **为可测试，client 是可注入的**：`distill` 接收一个 `complete` 可调用对象，测试传 fake，绝不在测试里联网。
 
 ### `distill.py` —— 编排
-- `select_candidates(conn, ...) -> list[conv]`：跳过噪声（`title=='(无标题)'`、`title LIKE 'You are running as%'`/`'The following is the Codex%'`/`'<local-command-caveat%'`、`message_count <= MIN_MSGS(默认4)`）、跳过黑名单/排除项目、跳过已缓存（同 `content_hash`+model+prompt_ver）。
+- `select_candidates(conn, ...) -> list[conv]`：**只按结构信号筛**——跳过 `message_count < MIN_MSGS(默认4)`、跳过 Claude 子代理会话（`native_id` 以 `agent-` 开头，即 Task 工具派生的转录）、跳过黑名单/排除项目、跳过已缓存（同 `content_hash`+model+prompt_ver）。**绝不按标题文本过滤**——实测会误杀 61+ 个真会话。"系统注入开场"这类只是首条消息噪声，会话本身有价值，应保留并交给模型；`build_prompt` 可顺手丢掉已知系统开场首句以省 token。
 - `build_prompt(conv, messages) -> (system, user)`：只取 `kind=='prose'` 的消息，按"role: text"拼接，整体截断到 `MAX_PROMPT_CHARS(默认 12000)`（超长取首尾各半，中间省略），调用脱敏 `redact()`。
 - `distill_one(conv, complete) -> Distillation`：调 client → 解析 JSON（失败重试一次、再失败记 `error` 不缓存）。
 - `run(conn, complete, limit=None, full=False) -> dict`：遍历候选，逐个 distill，**每会话 try/except 隔离**（一个失败不中断），写 `distillations` 表，返回 `{processed, skipped, dropped, failed}`。
 
-### `redact.py` —— 脱敏
+### `redact.py` —— 脱敏（尽力而为，G4）
 `redact(text) -> str`：正则替换 `sk-[A-Za-z0-9]{20,}`、`gh[pousr]_[A-Za-z0-9]{20,}`、`AKIA[0-9A-Z]{16}`、`Bearer\s+\S+`、邮箱、`/Users/<user>/` → 占位符。独立纯函数，单测覆盖。
+> **诚实声明**：正则脱敏是**尽力而为**，挡不住自定义格式 token、或正文里"我的密码是 X"这类自然语言泄露。真正的隐私控制是三层：① 只发 prose、不发工具输出；② 端点可指自建/可信代理；③ 项目黑名单 + `--dry-run` 审计。脱敏只是兜底，不是保证。敏感项目应直接拉黑而非依赖脱敏。
 
 ### 模型输出契约（结构化 JSON）
 `distill_one` 要求模型返回：
@@ -82,8 +85,14 @@ OpenAI 兼容 Chat Completions 客户端，用 `urllib.request` POST。
   "drop": false
 }
 ```
+- 所有文本字段**用中文输出**（用户语言）。
 - `drop=true` 或 `value < VALUE_MIN(默认2)` → 标记为低价值，不生成精华卡（但仍缓存，避免重复调用）。
-- `topics` 用受控引导（prompt 给出建议大类：编程/产品/电商/3D打印/部署运维/创意设计/学习研究/其他），允许新标签但鼓励复用。
+- **`topics` 用封闭受控词表**（G1 防碎片化）：模型只能从固定集合里选 1-3 个，不得自造。默认词表（取自用户真实项目分布，可在常量里调）：
+  `电商运营`、`3D打印`、`Agent/AI开发`、`部署运维`、`网页爬虫`、`创意设计`、`知识管理`、`产品规划`、`学习研究`、`工具脚本`、`其他`。
+  prompt 显式给出该列表并要求"只能选其中的值"。`其他` 里反复出现的主题，留作后续人工/单独一轮提升为正式大类（本期不做）。受控词表同时消除主题页 slug 撞名问题。
+
+### JSON 解析容错（G5）
+很多第三方 OpenAI 兼容端点**不支持 `response_format`**，模型可能把 JSON 包在 ```` ```json ```` 围栏里或前面加说明文字。解析必须：① 先剥 Markdown 代码围栏；② 再用括号配对抓取第一个完整 `{…}` 块；③ `json.loads`；④ 失败则重试一次（prompt 末尾追加"只输出 JSON，不要任何其他文字"）；⑤ 再失败记 `error`、不缓存。
 
 ### `store.py` 增量
 新表（不动 P1 既有表）：
@@ -103,18 +112,23 @@ CREATE TABLE IF NOT EXISTS distillations (
 ```
 新函数：`get_distillation`、`upsert_distillation`、`distillations_by_topic`、`distill_stats`。
 
-### `render_distill.py` —— 产物
-- 精华卡 `distilled/<起始日期>/<source>__<slug>__<native_id>.md`：front matter（conv_id/源/主题/价值/链接回 raw 与原始 md）+ 正文（总结/要点/决策/待办）。
+### `render_distill.py` —— 产物（含对账清理，G3）
+- 精华卡 `distilled/<起始日期>/<source>__<slug>__<native_id>.md`：front matter（conv_id/源/主题/价值/链接回 raw 与原始 md）+ 正文（总结/要点/决策/待办）。文件名沿用 P1 的完整 `native_id`，无碰撞。
 - 主题页 `topics/<主题slug>.md`：列出该主题下所有会话的一句话总结 + 链接（按时间倒序）。
+- **对账重建（关键）**：每次渲染从 `distillations` 表**全量重建**：
+  - 主题页整目录先清空再按 DB 重写（避免残留已改主题/已删条目）；
+  - 精华卡：`dropped=1` 或表中已无的会话，其旧卡片文件要删除；只为有效精炼写卡。
+  这避免"内容变了/翻成 dropped 后旧 md 残留"——与 P1 抓到的 md 覆盖 bug 同类，必须主动对账。
 
 ### `cli.py` 新子命令
 ```
-agent-archive distill [--limit N] [--full] [--exclude-project X] [--yes]
+agent-archive distill [--limit N] [--full] [--exclude-project X] [--dry-run] [--yes]
                          # 跑精炼；首次/未 --yes 时打印将外发的会话数与目标 base_url 确认
+                         # --dry-run：只打印将外发哪些会话 + 脱敏后 prompt 样例，绝不联网（隐私审计）
 agent-archive topics     # 重建主题索引页
 agent-archive distill-stats   # 已精炼/丢弃/失败/各主题计数
 ```
-distill 跑完自动重建主题页。产物目录可像 md/ 一样软链进 Obsidian。
+distill 跑完自动重建主题页（含对账清理）。产物目录可像 md/ 一样软链进 Obsidian。
 
 ## 数据流 / 增量 / 错误处理
 
@@ -127,19 +141,22 @@ distill 跑完自动重建主题页。产物目录可像 md/ 一样软链进 Obs
 ## 测试（TDD，绝不联网）
 
 - `redact`：各类密钥/邮箱/路径被抹、正常文本不动。
-- `select_candidates`：噪声/黑名单/已缓存被正确排除。
-- `build_prompt`：只含 prose、超长截断首尾、已脱敏。
-- `distill_one`：注入 fake `complete` 返回合法 JSON → 正确解析；返回坏 JSON → 重试后记 error 不抛；`drop`/低 value → 标记。
+- `select_candidates`：**消息少/子代理 `agent-*`/黑名单/已缓存被排除；`(无标题)` 但消息多的真会话被保留**（G2 回归）；系统注入开场的真会话被保留。
+- `build_prompt`：只含 prose、超长截断首尾、已脱敏、丢掉已知系统开场首句。
+- JSON 解析：剥 ```` ```json ```` 围栏、从"废话+{…}+废话"中抓出 JSON、合法/非法分别处理。
+- `topics` 受控：模型返回词表外标签时被丢弃/归入"其他"，不进主题集。
+- `distill_one`：注入 fake `complete` 返回合法 JSON → 正确解析；坏 JSON → 重试后记 error 不抛；`drop`/低 value → 标记。
 - `run`：fake client，多会话含一个抛错 → 其余成功、failed 计数、缓存正确、幂等。
 - `store` distillations：upsert/get/by_topic/幂等。
-- `render_distill`：精华卡与主题页结构正确。
+- `render_distill`：精华卡与主题页结构正确；**对账——会话翻成 dropped 后旧卡片被删、主题页不残留旧条目**（G3 回归）。
 - 全程用 fake LLM client，零真实 API 调用。
 
 ## 首跑预期与成本
 
-- 候选约 **160** 个会话（已排除 ~172 噪声）。
-- 建议先 `distill --limit 10` 试跑看精华卡质量与主题标签是否合理，再全量。
-- 花费取决于你选的第三方 model 与定价；只发 prose + 截断到 ~12k 字符控制单次 token。
+- 候选数（按新结构筛选，保留了原会被误杀的真会话）：约 **200-230** 个（仅排除 <4 消息与 `agent-*` 子代理）。
+- **顺序执行**（v1 不并发，便于错误隔离与限流）：每会话一次调用 ≈ 3-10 秒 → 首跑约 **15-35 分钟**。并发推迟到将来。
+- token 量：每会话只发 prose 且截断到 `MAX_PROMPT_CHARS`(默认 12000 字符 ≈ 4k token)，输出几百 token → 单会话约 ~5k token；全量 ~1-1.2M token。按主流第三方 model（如 DeepSeek/gpt-4o-mini 级）量级，全量花费很低。
+- 建议先 `distill --limit 10` 试跑看精华卡质量与主题标签是否合理，再全量；`--dry-run` 先审计外发内容。
 
 ## 实现范围（最小闭环）
 
@@ -154,12 +171,14 @@ distill 跑完自动重建主题页。产物目录可像 md/ 一样软链进 Obs
 
 | 风险 | 对策 |
 |------|------|
-| 对话含密钥/隐私外发 | 只发 prose、发送前 `redact`、端点可配、显式 opt-in、项目黑名单、不进每日自动任务 |
+| 🔴 候选筛选误杀真会话(G2) | **只按结构信号筛（消息数/子代理），绝不按标题文本**；噪声交模型 drop |
+| 🔴 主题标签碎片化(G1) | **封闭受控词表**，模型只能选不能造；slug 撞名一并消除 |
+| 对话含密钥/隐私外发 | 只发 prose、`redact`(尽力而为)、端点可配、显式 opt-in、黑名单、`--dry-run` 审计、不进每日自动任务 |
+| 陈旧产物残留(G3) | 渲染对账：主题页全量重建、dropped/失效会话卡片删除 |
+| 模型返回非法 JSON(G5) | 剥围栏 + 抓首个 `{…}` + 重试一次 + 记 error 不缓存 |
 | 第三方 API 不稳/限流 | 每会话错误隔离 + 指数退避 + 断点续 + `--limit` |
-| 模型返回非法 JSON | 双重要求 JSON + 容错解析 + 重试一次 + 记 error 不缓存 |
 | 超长会话超 token | 只 prose + 截断首尾各半 |
-| 主题标签发散 | prompt 给受控大类引导，鼓励复用，`topics` 命令可后续归并 |
-| 首跑花费/耗时 | 默认提示确认 + `--limit` 试跑 + 增量缓存 |
+| 首跑花费/耗时 | 顺序 ~15-35 分钟；默认提示确认 + `--limit` 试跑 + 增量缓存 |
 
 ## 待你拍板的实现细节
 
