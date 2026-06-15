@@ -630,6 +630,15 @@ def test_build_prompt_only_prose_redacted_truncated(tmp_path):
     assert "sk-abcdefghijklmnopqrstuvwx" not in user   # 已脱敏
     assert "好的" in user
     assert "电商运营" in system               # 受控词表在 system 里给出
+
+def test_build_prompt_truncates_overlong(tmp_path):
+    from agent_archive.distill import MAX_PROMPT_CHARS
+    c = _conn(tmp_path)
+    big = "甲" * (MAX_PROMPT_CHARS * 2)        # 远超上限的单条 prose
+    _add(c, "claude:big", [("user","prose",big),("assistant","prose","乙乙乙")])
+    _, user = build_prompt(c, "claude:big")
+    assert "…[中间省略]…" in user              # 走了首尾各半的截断分支
+    assert len(user) < MAX_PROMPT_CHARS + 200  # 截断后受控（含省略标记的余量）
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -718,7 +727,7 @@ def build_prompt(conn, conv_id: str):
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `.venv/bin/python -m pytest tests/test_distill.py -q`
-Expected: PASS（4 passed）。
+Expected: PASS（5 passed）。
 
 - [ ] **Step 5: Commit**
 
@@ -755,6 +764,17 @@ def test_distill_one_ok_redacts_output(tmp_path):
     assert "a@b.com" not in rec["summary"]        # 输出回程脱敏
     assert json.loads(rec["topics"]) == ["电商运营"]  # 词表收敛
     assert rec["redacted"] == 1
+
+def test_distill_one_retries_bad_json_then_succeeds(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:r", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    good = json.dumps({"summary":"s","bullets":["b"],"decisions":[],"todos":[],
+                       "topics":["其他"],"value":3,"drop":False})
+    seq = ["这不是JSON", good]                  # 第一次坏、第二次好
+    def complete(system, user, **kw):
+        return seq.pop(0)
+    rec = distill_one(c, "claude:r", complete)
+    assert rec["status"] == "ok" and seq == []   # 重试一次后成功
 
 def test_distill_one_drop_or_lowvalue(tmp_path):
     c = _conn(tmp_path)
@@ -802,7 +822,12 @@ def distill_one(conn, conv_id: str, complete, model: str = "") -> dict:
     system, user = build_prompt(conn, conv_id)
     ch = conn.execute("SELECT content_hash FROM conversations WHERE id=?", (conv_id,)).fetchone()[0]
     raw = complete(system, user, model=model)
-    data = extract_json(raw)                      # 解析失败抛 ValueError，由 run 兜
+    try:
+        data = extract_json(raw)
+    except ValueError:                            # 坏 JSON：用更强约束重试一次（设计要求）
+        raw2 = complete(system + "\n严格只输出 JSON，不要任何其他文字、不要代码围栏。",
+                        user, model=model)
+        data = extract_json(raw2)                  # 再失败则抛 ValueError，由 run 记 error
     def _red_list(xs):
         return [redact(str(x)) for x in (xs or [])]
     topics = normalize_topics(data.get("topics") or [])
