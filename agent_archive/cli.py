@@ -2,6 +2,7 @@ from __future__ import annotations
 import os, argparse, datetime, collections
 from agent_archive import sync as sync_mod, store
 from agent_archive.collectors import get_collectors
+from agent_archive import distill as distill_mod, render_distill, llm as llm_mod
 
 
 def _fmt_row(c: dict) -> str:
@@ -40,6 +41,15 @@ def main(argv=None) -> int:
 
     sub.add_parser("stats")
 
+    pds = sub.add_parser("distill")
+    pds.add_argument("--limit", type=int, default=None)
+    pds.add_argument("--exclude-project", action="append", default=[])
+    pds.add_argument("--dry-run", action="store_true")
+    pds.add_argument("--yes", action="store_true")
+
+    sub.add_parser("topics")
+    sub.add_parser("distill-stats")
+
     args = p.parse_args(argv)
     root = _root(args)
 
@@ -76,6 +86,45 @@ def main(argv=None) -> int:
     if args.cmd == "stats":
         for src, s in store.stats(conn).items():
             print(f"{src}: {s['conversations']} 会话 / {s['messages']} 消息")
+        return 0
+    if args.cmd == "distill":
+        cands = distill_mod.select_candidates(
+            conn, model=os.environ.get("AGENT_ARCHIVE_LLM_MODEL", ""),
+            exclude_projects=tuple(args.exclude_project))
+        if args.limit:
+            cands = cands[:args.limit]
+        if args.dry_run:
+            print(f"[dry-run] 将外发 {len(cands)} 个会话至 "
+                  f"{os.environ.get('AGENT_ARCHIVE_LLM_BASE_URL','(未配置)')}")
+            for cv in cands:
+                print(f"  {cv['id']}  {cv['title'][:40]}")
+            if cands:
+                _, sample = distill_mod.build_prompt(conn, cands[0]["id"])
+                print("\n--- 脱敏后 prompt 样例（首个会话，截断）---\n" + sample[:600])
+            return 0
+        base = os.environ.get("AGENT_ARCHIVE_LLM_BASE_URL")
+        key = os.environ.get("AGENT_ARCHIVE_LLM_API_KEY")
+        model = os.environ.get("AGENT_ARCHIVE_LLM_MODEL")
+        if not (base and key and model):
+            print("缺配置：请设 AGENT_ARCHIVE_LLM_BASE_URL / _API_KEY / _MODEL")
+            return 2
+        if not args.yes:
+            print(f"将把 {len(cands)} 个会话外发至 {base}（model={model}）。加 --yes 确认执行。")
+            return 0
+        def complete(system, user, **kw):
+            return llm_mod.complete(system, user, base_url=base, api_key=key, model=model)
+        res = distill_mod.run(conn, complete, model=model, limit=args.limit,
+                              exclude_projects=tuple(args.exclude_project))
+        render_distill.render_all(conn, root)
+        print(f"ok={res['ok']} dropped={res['dropped']} failed={res['failed']}")
+        return 0
+    if args.cmd == "topics":
+        render_distill.render_all(conn, root)
+        print("主题页已重建")
+        return 0
+    if args.cmd == "distill-stats":
+        for status, n in store.distill_stats(conn).items():
+            print(f"{status}: {n}")
         return 0
     return 1
 
