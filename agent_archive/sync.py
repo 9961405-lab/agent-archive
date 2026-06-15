@@ -8,10 +8,17 @@ def _slug(s: str) -> str:
     return (s or "untitled")[:40]
 
 
+def _safe_id(s: str) -> str:
+    # 文件名安全化但不截断——native_id 本身唯一，截断会引入碰撞
+    return re.sub(r"[\\/:*?\"<>|\n\r\t ]+", "_", s).strip("_")
+
+
 def _md_path(root: str, conv, fallback_day: str = "0000-00-00") -> str:
     day = (conv.started_at or "")[:10] or fallback_day
-    short = conv.id.split(":")[-1][:8]
-    name = f"{conv.source}__{_slug(conv.title)}__{short}.md"
+    # 用完整 native_id 保证唯一：子代理会话文件名共享 "agent-" 前缀，
+    # 取前 8 字符会大量碰撞、相互覆盖 md。
+    native_id = conv.id.split(":", 1)[-1]
+    name = f"{conv.source}__{_slug(conv.title)}__{_safe_id(native_id)}.md"
     return os.path.join(root, "md", day, name)
 
 

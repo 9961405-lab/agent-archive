@@ -67,3 +67,13 @@ def test_md_path_uses_mtime_when_no_started_at(tmp_path):
         Conversation("claude:x", "claude", "t", None, None, None, [], ""),
         fallback_day="2025-01-02")
     assert "/md/2025-01-02/" in path
+
+def test_md_path_no_collision_for_shared_prefix_ids(tmp_path):
+    # 子代理会话共享 "agent-" 前缀且都无标题，完整 native_id 必须保证唯一
+    def cv(nid):
+        return Conversation(f"claude:{nid}", "claude", "(无标题)",
+            None, "2026-06-14T00:00:00Z", None, [], "")
+    p1 = sync._md_path("/root", cv("agent-ac3c8b73-1111"), "x")
+    p2 = sync._md_path("/root", cv("agent-af127cd7-2222"), "x")
+    assert p1 != p2
+    assert "agent-ac3c8b73-1111" in p1 and "agent-af127cd7-2222" in p2
