@@ -100,6 +100,23 @@ def test_distill_one_drop_or_lowvalue(tmp_path):
     rec = distill_one(c, "claude:y", _fake_complete(payload))
     assert rec["status"] == "dropped"
 
+def test_distill_one_handles_string_value_and_string_list_fields(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:z", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    payload = json.dumps({"summary":"s","bullets":"要点一, 要点二","decisions":[],"todos":[],
+                          "topics":["其他"],"value":"high","drop":False})
+    rec = distill_one(c, "claude:z", _fake_complete(payload))
+    assert rec["status"] == "dropped"                       # "high"→0 < VALUE_MIN
+    assert json.loads(rec["bullets"]) == ["要点一, 要点二"]   # 整条，不按字符拆
+
+def test_distill_one_numeric_string_value(tmp_path):
+    c = _conn(tmp_path)
+    _add(c, "claude:n", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])
+    payload = json.dumps({"summary":"s","bullets":["b"],"decisions":[],"todos":[],
+                          "topics":["其他"],"value":"4","drop":False})
+    rec = distill_one(c, "claude:n", _fake_complete(payload))
+    assert rec["status"] == "ok" and rec["value"] == 4
+
 def test_run_isolates_failures(tmp_path):
     c = _conn(tmp_path)
     _add(c, "claude:a", [("user","prose","x"*PROSE_MIN_CHARS),("assistant","prose","ok")])

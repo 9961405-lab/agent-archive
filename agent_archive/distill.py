@@ -77,6 +77,17 @@ from agent_archive.topics import normalize_topics
 from agent_archive import store
 
 
+def _coerce_int(v, default: int = 0) -> int:
+    """把模型给的 value 安全转 int：'4'→4, '5/5'/'high'→default, 3.7→3。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return default
+
+
 def distill_one(conn, conv_id: str, complete, model: str = "") -> dict:
     """对单会话调模型并解析，输出回程脱敏，返回已 upsert 的记录 dict。"""
     system, user = build_prompt(conn, conv_id)
@@ -89,9 +100,15 @@ def distill_one(conn, conv_id: str, complete, model: str = "") -> dict:
                         user, model=model)
         data = extract_json(raw2)                  # 再失败则抛 ValueError，由 run 记 error
     def _red_list(xs):
-        return [redact(str(x)) for x in (xs or [])]
+        # 模型可能把列表字段返回成字符串：按整体当一条，别按字符拆
+        if isinstance(xs, str):
+            xs = [xs] if xs.strip() else []
+        elif not isinstance(xs, list):
+            xs = []
+        return [redact(str(x)) for x in xs]
     topics = normalize_topics(data.get("topics") or [])
-    dropped = bool(data.get("drop")) or int(data.get("value") or 0) < VALUE_MIN
+    value = _coerce_int(data.get("value"))        # 模型可能返回 "high"/"5/5"/3.5 等
+    dropped = bool(data.get("drop")) or value < VALUE_MIN
     rec = dict(
         conv_id=conv_id, content_hash=ch, model=model, prompt_version=PROMPT_VERSION,
         status="dropped" if dropped else "ok",
@@ -100,7 +117,7 @@ def distill_one(conn, conv_id: str, complete, model: str = "") -> dict:
         decisions=json.dumps(_red_list(data.get("decisions")), ensure_ascii=False),
         todos=json.dumps(_red_list(data.get("todos")), ensure_ascii=False),
         topics=json.dumps(topics, ensure_ascii=False),
-        value=int(data.get("value") or 0), redacted=1, last_error=None)
+        value=value, redacted=1, last_error=None)
     store.upsert_distillation(conn, rec)
     return rec
 
