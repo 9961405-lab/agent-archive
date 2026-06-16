@@ -32,3 +32,15 @@ def test_complete_raises_on_persistent_error():
     with pytest.raises(LLMError):
         complete("s", "u", base_url="http://x/v1", api_key="k", model="m",
                  transport=t, max_retries=2, backoff=0)
+
+def test_complete_rejects_non_ascii_key_clearly_before_send():
+    t = FakeTransport([(200, _ok('{"x":1}'))])
+    with pytest.raises(LLMError) as ei:
+        complete("s", "u", base_url="http://x/v1", api_key="ＳＫ-bad", model="m", transport=t)
+    assert "ASCII" in str(ei.value)
+    assert t.calls == []          # 校验在发请求前，绝不外发
+
+def test_complete_strips_whitespace_in_key():
+    t = FakeTransport([(200, _ok('{"x":1}'))])
+    out = complete("s", "u", base_url="http://x/v1", api_key="  sk-clean\n", model="m", transport=t)
+    assert out == '{"x":1}'

@@ -63,6 +63,9 @@ def complete(system: str, user: str, *, base_url: str, api_key: str, model: str,
              transport=_http_transport, max_retries: int = 3, backoff: float = 1.0) -> str:
     """OpenAI 兼容 chat completions。json_mode 默认开；端点 400 则去 response_format 重试一次。
     transport(url, headers, body)->(status, dict) 可注入，便于测试不联网。"""
+    api_key = (api_key or "").strip()            # 去掉粘贴时混入的换行/空格
+    if not api_key.isascii():
+        raise LLMError("API key 含非 ASCII 字符（疑似全角/不可见字符），请重新粘贴纯英文数字 key")
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     base_payload = {"model": model,
