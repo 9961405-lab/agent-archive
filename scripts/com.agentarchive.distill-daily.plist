@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.agentarchive.distill-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mac/agent-archive/scripts/auto-distill.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENT_ARCHIVE_ROOT</key><string>/Users/mac/agent-archive-data</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>35</integer></dict>
+  <key>StandardOutPath</key><string>/Users/mac/agent-archive-data/distill-auto.log</string>
+  <key>StandardErrorPath</key><string>/Users/mac/agent-archive-data/distill-auto.err</string>
+</dict>
+</plist>
