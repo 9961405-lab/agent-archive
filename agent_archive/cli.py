@@ -3,6 +3,7 @@ import os, argparse, datetime, collections
 from agent_archive import sync as sync_mod, store
 from agent_archive.collectors import get_collectors
 from agent_archive import distill as distill_mod, render_distill, llm as llm_mod
+from agent_archive import digest as digest_mod
 
 
 def _fmt_row(c: dict) -> str:
@@ -49,6 +50,10 @@ def main(argv=None) -> int:
 
     sub.add_parser("topics")
     sub.add_parser("distill-stats")
+
+    pg = sub.add_parser("digest")          # 周期总结（本地聚合，输出 Markdown）
+    pg.add_argument("--period", choices=["day", "week", "month"], default="day")
+    pg.add_argument("--date", default=None)
 
     args = p.parse_args(argv)
     root = _root(args)
@@ -125,6 +130,9 @@ def main(argv=None) -> int:
     if args.cmd == "distill-stats":
         for status, n in store.distill_stats(conn).items():
             print(f"{status}: {n}")
+        return 0
+    if args.cmd == "digest":
+        print(digest_mod.build_digest(conn, period=args.period, date=args.date))
         return 0
     return 1
 
