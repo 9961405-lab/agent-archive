@@ -64,6 +64,27 @@
       ln -s ~/agent-archive-data/distilled "~/Documents/Obsidian Vault/精华"
       ln -s ~/agent-archive-data/topics    "~/Documents/Obsidian Vault/主题"
 
+## 接入 Agent（MCP server，让模型读知识库）
+
+把知识库暴露成 MCP 工具，任何 MCP 客户端的模型都能查（只读、纯本地、数据不出本机）。
+
+安装依赖：`.venv/bin/python -m pip install -e ".[mcp]"`
+
+工具：`search` / `get_conversation` / `recent` / `day` / `digest` / `list_topics` / `by_topic`。
+
+### Claude Code
+    claude mcp add agent-archive \
+      --env AGENT_ARCHIVE_ROOT=/Users/mac/agent-archive-data \
+      -- /Users/mac/agent-archive/.venv/bin/agent-archive-mcp
+新开会话后，模型即可调用上面的工具查你的对话历史。
+
+### Claude Desktop
+编辑 `~/Library/Application Support/Claude/claude_desktop_config.json`，把
+`scripts/mcp-config.example.json` 里的 `mcpServers.agent-archive` 段合并进去，重启 Claude Desktop。
+
+### 自测
+    AGENT_ARCHIVE_ROOT=~/agent-archive-data .venv/bin/agent-archive-mcp   # 启动 stdio server（Ctrl-C 退出）
+
 ## 后续（未实现）
 
-Cursor / Devin（需 API token）/ WorkBuddy / 飞书；以及 LLM 摘要、语义检索、同步层。详见 `docs/superpowers/specs/`。
+Cursor / Devin（需 API token）/ WorkBuddy / 飞书；以及语义检索（向量）。详见 `docs/superpowers/specs/`。

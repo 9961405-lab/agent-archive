@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agent-archive": {
+      "command": "/Users/mac/agent-archive/.venv/bin/agent-archive-mcp",
+      "env": {
+        "AGENT_ARCHIVE_ROOT": "/Users/mac/agent-archive-data"
+      }
+    }
+  }
+}
