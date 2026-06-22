@@ -1,0 +1,8 @@
+{"type":"session_meta","payload":{"id":"019e060b-1e4c-79a3-b534-9e4cc5dc2450","timestamp":"2026-05-08T05:24:12.492Z","cwd":"/home/dev/demo-project"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions> ..."}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"帮我核对快团团订单"}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"gAAAA..."}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"我先看下项目结构"}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":"我先看下项目结构"}}
+{"type":"compacted","payload":{"message":"","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"帮我核对快团团订单"}]}]}}
