@@ -18,6 +18,14 @@ _CJK = re.compile("([㐀-鿿豈-﫿぀-ヿ가-힣＀-￯])")
 def _segment(text: str) -> str:
     return _CJK.sub(r" \1 ", text)
 
+
+# 把 snippet 里逐字分词留下的空格收回来（CJK 字之间 / CJK 与高亮括号之间）
+_DESEG = re.compile(r"(?<=[㐀-鿿豈-﫿぀-ヿ가-힣＀-￯\[\]]) +(?=[㐀-鿿豈-﫿぀-ヿ가-힣＀-￯\[\]])")
+
+
+def _desegment(text: str) -> str:
+    return _DESEG.sub("", text).strip()
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT, project TEXT,
@@ -88,13 +96,19 @@ def upsert_conversation(conn, conv: Conversation, md_ref: str) -> None:
     conn.commit()
 
 
-def search(conn, query: str, source: str | None = None, project: str | None = None) -> list[dict]:
-    sql = ("SELECT DISTINCT c.id AS conv_id, c.source, c.title, c.project, c.md_ref "
-           "FROM messages_fts f JOIN conversations c ON c.id=f.conv_id "
-           "WHERE messages_fts MATCH ?")
+def search(conn, query: str, source: str | None = None, project: str | None = None,
+           preview: bool = False) -> list[dict]:
     toks = _segment(query).split()
     if not toks:
         return []  # 空/纯空白查询：直接返回，避免 FTS5 语法错误
+    # snippet() 不能与 DISTINCT/GROUP BY 同用，preview 时改为按 rank 取行、Python 端去重
+    cols = "c.id AS conv_id, c.source, c.title, c.project, c.md_ref"
+    if preview:
+        cols += ", snippet(messages_fts, 0, '[', ']', '…', 8) AS preview"
+    else:
+        cols = "DISTINCT " + cols
+    sql = (f"SELECT {cols} FROM messages_fts f JOIN conversations c ON c.id=f.conv_id "
+           "WHERE messages_fts MATCH ?")
     # 转义短语内的双引号（"→""），防止用户查询里的引号破坏 FTS 短语
     phrase = " ".join(toks).replace('"', '""')
     args = ['"' + phrase + '"']
@@ -102,7 +116,44 @@ def search(conn, query: str, source: str | None = None, project: str | None = No
         sql += " AND c.source=?"; args.append(source)
     if project:
         sql += " AND c.project LIKE ?"; args.append(f"%{project}%")
-    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    if preview:
+        sql += " ORDER BY rank"  # 最佳命中在前，去重时保留它的片段
+    rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    if not preview:
+        return rows
+    seen, out = set(), []
+    for r in rows:
+        if r["conv_id"] not in seen:
+            seen.add(r["conv_id"])
+            r["preview"] = _desegment(r.get("preview") or "")
+            out.append(r)
+    return out
+
+
+def all_conversation_ids(conn) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT id FROM conversations")}
+
+
+def delete_conversation(conn, conv_id: str) -> tuple[str | None, str | None]:
+    """删除一条会话及其消息/FTS/精炼记录。返回 (raw_ref, md_ref) 供调用方清理文件。"""
+    row = conn.execute("SELECT raw_ref, md_ref FROM conversations WHERE id=?",
+                       (conv_id,)).fetchone()
+    if not row:
+        return (None, None)
+    conn.execute("DELETE FROM messages_fts WHERE conv_id=?", (conv_id,))
+    conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
+    conn.execute("DELETE FROM distillations WHERE conv_id=?", (conv_id,))
+    conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+    return (row["raw_ref"], row["md_ref"])
+
+
+def delete_manifest_missing(conn) -> int:
+    """删除源文件已不存在的 manifest 行，返回删除数。"""
+    import os as _os
+    gone = [(s, p) for (s, p) in conn.execute("SELECT source, src_path FROM manifest")
+            if not _os.path.exists(p)]
+    conn.executemany("DELETE FROM manifest WHERE source=? AND src_path=?", gone)
+    return len(gone)
 
 
 def list_conversations(conn, day: str | None = None, source: str | None = None) -> list[dict]:

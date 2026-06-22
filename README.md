@@ -37,8 +37,12 @@ AGENT_ARCHIVE_ROOT=~/agent-archive-data .venv/bin/python -m agent_archive.cli se
     .venv/bin/python -m agent_archive.cli sync --source codex     # 只同步某源
     .venv/bin/python -m agent_archive.cli sync --full             # 全量重建
     .venv/bin/python -m agent_archive.cli search "关键词"
+    .venv/bin/python -m agent_archive.cli search "关键词" --preview          # 显示命中片段
+    .venv/bin/python -m agent_archive.cli search "关键词" --format json      # 导出 JSON，便于喂给其他工具
     .venv/bin/python -m agent_archive.cli search "x" --source claude --project demo-project
     .venv/bin/python -m agent_archive.cli stats
+    .venv/bin/python -m agent_archive.cli prune --dry-run                   # 列出源文件已删除的僵尸会话
+    .venv/bin/python -m agent_archive.cli prune --yes                       # 清理它们（含 raw/md 文件）
 
 档案默认在 `~/agent-archive-data/`（可用 `--root` 或环境变量 `AGENT_ARCHIVE_ROOT` 覆盖）。
 三层产物：`raw/`（原文件镜像，hardlink）、`md/<日期>/`（精炼 Markdown）、`index.sqlite`（FTS5 全文索引 + 增量 manifest）。

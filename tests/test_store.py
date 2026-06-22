@@ -90,3 +90,18 @@ def test_segment_covers_cjk_kana_hangul_fullwidth():
     from agent_archive.store import _segment
     for ch in ("中", "あ", "한", "！"):
         assert f" {ch} " in _segment(f"x{ch}y")   # 逐字加空格 → 可子串检索
+
+
+def test_search_preview_returns_snippet(tmp_path):
+    conn = store.connect(str(tmp_path / "a.sqlite")); store.init_db(conn)
+    store.upsert_conversation(conn, _conv(prose="帮我核对快团团订单金额对不上"),
+                              md_ref="md/x.md")
+    hits = store.search(conn, "订单", preview=True)
+    assert len(hits) == 1
+    assert "preview" in hits[0]
+    pv = hits[0]["preview"]
+    assert "[订]" in pv                        # 命中字被 [ ] 高亮（逐字分词）
+    assert "核对快团团" in pv                  # 上下文可读，分词空格已收回
+    assert "  " not in pv                      # 无连续空格
+    # 非 preview 不带该字段
+    assert "preview" not in store.search(conn, "订单")[0]
