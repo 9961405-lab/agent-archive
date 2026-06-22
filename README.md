@@ -1,6 +1,6 @@
 # agent-archive
 
-![CI](https://github.com/moon7787/agent-archive/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/9961405-lab/agent-archive/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -11,7 +11,7 @@
 ## 5 分钟上手
 
 ```bash
-git clone https://github.com/moon7787/agent-archive && cd agent-archive
+git clone https://github.com/9961405-lab/agent-archive && cd agent-archive
 python3 -m venv .venv                       # 需要 Python 3.11+
 .venv/bin/python -m pip install -e .
 
