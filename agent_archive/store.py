@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import re
 import sqlite3
 from agent_archive.models import Conversation
@@ -51,6 +52,11 @@ CREATE TABLE IF NOT EXISTS distillations (
 
 
 def connect(path: str) -> sqlite3.Connection:
+    # 确保父目录存在，否则首次 stats/search（在 sync 之前）会以
+    # sqlite3.OperationalError: unable to open database file 丑陋崩溃。
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
