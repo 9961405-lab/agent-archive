@@ -76,3 +76,11 @@ def test_search_with_quote_does_not_crash(tmp_path):
     store.upsert_conversation(conn, _conv(prose='他说"你好世界"了'), md_ref="m")
     assert isinstance(store.search(conn, '"'), list)  # 必须不抛
     assert len(store.search(conn, "你好世界")) == 1
+
+
+def test_connect_creates_missing_parent_dir(tmp_path):
+    # 数据根目录还不存在时（朋友先跑 stats/search，未 sync），connect 应自动建目录
+    db = tmp_path / "nope" / "deeper" / "index.sqlite"
+    conn = store.connect(str(db)); store.init_db(conn)
+    assert db.parent.is_dir()
+    assert store.list_conversations(conn) == []

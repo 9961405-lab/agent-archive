@@ -12,7 +12,9 @@
 
 ```bash
 git clone https://github.com/9961405-lab/agent-archive && cd agent-archive
-python3 -m venv .venv                       # 需要 Python 3.11+
+python3 --version                           # 必须 ≥ 3.11；低于 3.11 请先装新版（brew install python@3.12）
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip   # 老 pip 不支持 pyproject 的 editable 安装
 .venv/bin/python -m pip install -e .
 
 # 把你本机的 Claude Code / Codex 对话扫进知识库（纯本地，不联网）
