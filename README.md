@@ -44,6 +44,8 @@ AGENT_ARCHIVE_ROOT=~/agent-archive-data .venv/bin/python -m agent_archive.cli se
     .venv/bin/python -m agent_archive.cli prune --dry-run                   # 列出源文件已删除的僵尸会话
     .venv/bin/python -m agent_archive.cli prune --yes                       # 清理它们（含 raw/md 文件）
 
+> ⚠️ **prune 只用于手动大扫除，切勿放进定时任务。** 它删除的是归档副本——源文件一旦消失（如 Claude/Codex 轮转旧 session）就会被清掉。本工具的意义是「源没了也替你留着」，把 prune 定时化会随着源端清理慢慢把你的档案删空。每日定时只应有 sync / distill / digest。
+
 档案默认在 `~/agent-archive-data/`（可用 `--root` 或环境变量 `AGENT_ARCHIVE_ROOT` 覆盖）。
 三层产物：`raw/`（原文件镜像，hardlink）、`md/<日期>/`（精炼 Markdown）、`index.sqlite`（FTS5 全文索引 + 增量 manifest）。
 
