@@ -11,7 +11,8 @@ MAX_INDEX_BYTES = 65536
 # short substring query (e.g. a 2-char term) never matches. We space-separate
 # CJK codepoints both at index and query time so each char is its own token and
 # substring queries become phrase queries.
-_CJK = re.compile(r"([㐀-鿿豈-﫿぀-ヿ])")
+# CJK表意+扩展A+兼容+假名+谚文+全角半角
+_CJK = re.compile("([㐀-鿿豈-﫿぀-ヿ가-힣＀-￯])")
 
 
 def _segment(text: str) -> str:

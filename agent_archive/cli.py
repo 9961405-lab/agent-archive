@@ -6,8 +6,11 @@ from agent_archive import distill as distill_mod, render_distill, llm as llm_mod
 from agent_archive import digest as digest_mod
 
 
+_SOURCE_TAGS = {"claude": "🟦claude", "codex": "🟧codex ", "hermes": "🟩hermes"}
+
+
 def _fmt_row(c: dict) -> str:
-    tag = "🟦claude" if c["source"] == "claude" else "🟧codex "
+    tag = _SOURCE_TAGS.get(c["source"], f"  {c['source']:6.6}")  # 未知源不再误标成 codex
     when = (c.get("started_at") or "")[11:16]  # HH:MM
     proj = os.path.basename((c.get("project") or "").rstrip("/")) or "-"
     return f"  {when:5} {tag}  {c['title'][:46]}   ({proj}, {c['message_count']}条)"

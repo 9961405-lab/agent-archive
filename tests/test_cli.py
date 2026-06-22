@@ -38,3 +38,12 @@ def test_cli_recent(tmp_path, monkeypatch, capsys):
     cli.main(["--root", root, "sync"])
     assert cli.main(["--root", root, "recent", "30"]) == 0
     assert "2026-06-14" in capsys.readouterr().out
+
+
+def test_fmt_row_source_tags():
+    # 回归:Hermes 曾被误标成 codex；未知源也不该误标
+    base = dict(started_at="2026-06-21T11:36:00Z", title="t", project="/p/x", message_count=1)
+    assert "🟩hermes" in cli._fmt_row({**base, "source": "hermes"})
+    assert "🟦claude" in cli._fmt_row({**base, "source": "claude"})
+    assert "🟧codex" in cli._fmt_row({**base, "source": "codex"})
+    assert "codex" not in cli._fmt_row({**base, "source": "hermes"})
