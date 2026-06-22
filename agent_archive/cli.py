@@ -47,7 +47,12 @@ def main(argv=None) -> int:
 
     sub.add_parser("stats")
 
-    pp = sub.add_parser("prune")          # 清理源文件已删除的僵尸会话
+    pp = sub.add_parser(
+        "prune",
+        help="手动清理源文件已删除的僵尸会话（⚠️ 删的是归档副本，勿放进定时任务）",
+        description="⚠️ 删除的是归档里的副本：源文件一旦消失（如 Claude/Codex 轮转旧 "
+                    "session）就会被清掉。归档的意义是「源没了也留着」，故 prune 只用于"
+                    "手动大扫除，绝不要放进 cron / launchd 定时，否则会慢慢把档案删空。")
     pp.add_argument("--dry-run", action="store_true", help="只列出将删除的会话，不实际删")
     pp.add_argument("--yes", action="store_true", help="确认删除（非 dry-run 时必须）")
 
@@ -123,7 +128,8 @@ def main(argv=None) -> int:
                 print(f"  …还有 {r['dead'] - len(r['ids'])} 个")
             return 0
         if not args.yes:
-            print("prune 会删除会话及其 raw/md 文件。确认请加 --yes，或先用 --dry-run 预览。")
+            print("⚠️ prune 会删除归档副本（会话 + raw/md 文件），源没了就清掉——仅用于手动清理，"
+                  "勿放进定时任务。确认请加 --yes，或先用 --dry-run 预览。")
             return 2
         r = prune_mod.prune(root, cols)
         print(f"已清理 {r['dead']} 个僵尸会话，删除 {r['files_removed']} 个文件，"
