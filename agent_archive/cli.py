@@ -34,6 +34,8 @@ def main(argv=None) -> int:
     pq.add_argument("query")
     pq.add_argument("--source", default=None)
     pq.add_argument("--project", default=None)
+    pq.add_argument("--preview", action="store_true", help="显示命中片段")
+    pq.add_argument("--format", choices=["text", "json"], default="text", help="json 便于喂给其他工具")
 
     pd = sub.add_parser("day")            # 某天做了什么（默认今天）
     pd.add_argument("date", nargs="?", default=None)
@@ -44,6 +46,10 @@ def main(argv=None) -> int:
     pr.add_argument("--source", default=None)
 
     sub.add_parser("stats")
+
+    pp = sub.add_parser("prune")          # 清理源文件已删除的僵尸会话
+    pp.add_argument("--dry-run", action="store_true", help="只列出将删除的会话，不实际删")
+    pp.add_argument("--yes", action="store_true", help="确认删除（非 dry-run 时必须）")
 
     pds = sub.add_parser("distill")
     pds.add_argument("--limit", type=int, default=None)
@@ -70,8 +76,17 @@ def main(argv=None) -> int:
     conn = store.connect(os.path.join(root, "index.sqlite"))
     store.init_db(conn)
     if args.cmd == "search":
-        for h in store.search(conn, args.query, source=args.source, project=args.project):
-            print(f"{h['conv_id']}  [{h['source']}]  {h['title']}\n    {h['md_ref']}")
+        hits = store.search(conn, args.query, source=args.source, project=args.project,
+                            preview=args.preview)
+        if args.format == "json":
+            import json
+            print(json.dumps(hits, ensure_ascii=False, indent=2))
+            return 0
+        for h in hits:
+            print(f"{h['conv_id']}  [{h['source']}]  {h['title']}")
+            if h.get("preview"):
+                print(f"    …{h['preview']}…")
+            print(f"    {h['md_ref']}")
         return 0
     if args.cmd == "day":
         day = args.date or datetime.date.today().isoformat()
@@ -94,6 +109,25 @@ def main(argv=None) -> int:
     if args.cmd == "stats":
         for src, s in store.stats(conn).items():
             print(f"{src}: {s['conversations']} 会话 / {s['messages']} 消息")
+        return 0
+    if args.cmd == "prune":
+        from agent_archive import prune as prune_mod
+        conn.close()  # prune 自行开连接
+        cols = get_collectors()
+        if args.dry_run:
+            r = prune_mod.prune(root, cols, dry_run=True)
+            print(f"将删除 {r['dead']} 个僵尸会话（源文件已不存在）")
+            for cid in r["ids"]:
+                print(f"  {cid}")
+            if r["dead"] > len(r["ids"]):
+                print(f"  …还有 {r['dead'] - len(r['ids'])} 个")
+            return 0
+        if not args.yes:
+            print("prune 会删除会话及其 raw/md 文件。确认请加 --yes，或先用 --dry-run 预览。")
+            return 2
+        r = prune_mod.prune(root, cols)
+        print(f"已清理 {r['dead']} 个僵尸会话，删除 {r['files_removed']} 个文件，"
+              f"{r['manifest_removed']} 条失效 manifest")
         return 0
     if args.cmd == "distill":
         cands = distill_mod.select_candidates(
