@@ -21,7 +21,7 @@ def test_parse_builds_conversation(tmp_path):
     c, refs = _ref(tmp_path)
     conv = c.parse(refs[0])
     assert conv.id == "claude:sess1"
-    assert conv.project == "/Users/mac/Desktop/房间渲染"
+    assert conv.project == "/home/dev/demo-project"
     assert conv.title == "帮我写个脚本"
     assert conv.started_at == "2026-06-14T07:12:19.891Z"
     assert conv.updated_at == "2026-06-14T07:12:30.000Z"

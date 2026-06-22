@@ -13,7 +13,8 @@ class Collector(Protocol):
 def get_collectors(only: str | None = None) -> list[Collector]:
     from agent_archive.collectors.claude import ClaudeCollector
     from agent_archive.collectors.codex import CodexCollector
-    cols: list[Collector] = [ClaudeCollector(), CodexCollector()]
+    from agent_archive.collectors.hermes import HermesCollector
+    cols: list[Collector] = [ClaudeCollector(), CodexCollector(), HermesCollector()]
     if only:
         cols = [c for c in cols if c.source == only]
     return cols

@@ -54,6 +54,54 @@ def test_build_prompt_only_prose_redacted_truncated(tmp_path):
     assert "好的" in user
     assert "电商运营" in system
 
+def test_build_prompt_strips_env_block_embedded(tmp_path):
+    # Codex 把 <environment_context>（含 cwd/shell/OS）注入到用户消息里，
+    # 即使消息还带真实提问，也必须剥掉这段元数据，但保留用户正文。
+    c = _conn(tmp_path)
+    msg = ("<environment_context>\n  <cwd>/Users/mac/secret/proj</cwd>\n"
+           "  <shell>zsh</shell>\n  <current_date>2026-06-16</current_date>\n"
+           "</environment_context>\n帮我重构这个函数")
+    _add(c, "codex:e", [("user","prose",msg),("assistant","prose","好的")])
+    _, user = build_prompt(c, "codex:e")
+    assert "<environment_context>" not in user
+    assert "secret/proj" not in user
+    assert "zsh" not in user
+    assert "帮我重构这个函数" in user
+
+def test_build_prompt_strips_user_instructions_block(tmp_path):
+    c = _conn(tmp_path)
+    msg = "<user_instructions>\nAlways answer in pirate speak.\n</user_instructions>\n真正的问题"
+    _add(c, "codex:ui", [("user","prose",msg),("assistant","prose","ok")])
+    _, user = build_prompt(c, "codex:ui")
+    assert "<user_instructions>" not in user
+    assert "pirate" not in user
+    assert "真正的问题" in user
+
+def test_build_prompt_drops_sys_openers_at_any_position(tmp_path):
+    # opener 注入块可能出现在任意位置（实测 caveat 在 seq 54/1447），不止首条。
+    c = _conn(tmp_path)
+    caveat = "<local-command-caveat>Caveat: messages below...</local-command-caveat>"
+    codex_assess = "The following is the Codex agent history whose request action you are assessing."
+    _add(c, "claude:m", [("user","prose","第一个真实问题"),
+                         ("assistant","prose","回答"),
+                         ("user","prose",caveat),
+                         ("user","prose",codex_assess),
+                         ("user","prose","第二个真实问题")])
+    _, user = build_prompt(c, "claude:m")
+    assert "local-command-caveat" not in user
+    assert "assessing" not in user
+    assert "第一个真实问题" in user
+    assert "第二个真实问题" in user
+
+def test_build_prompt_keeps_user_angle_brackets(tmp_path):
+    # 用户正文里正常的尖括号内容（HTML/泛型）不能被误删。
+    c = _conn(tmp_path)
+    _add(c, "claude:ab", [("user","prose","我想用 <div> 包裹，再加个 <T> 泛型怎么写"),
+                          ("assistant","prose","好")])
+    _, user = build_prompt(c, "claude:ab")
+    assert "<div>" in user
+    assert "<T>" in user
+
 def test_build_prompt_truncates_overlong(tmp_path):
     c = _conn(tmp_path)
     big = "甲" * (MAX_PROMPT_CHARS * 2)

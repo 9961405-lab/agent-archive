@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from agent_archive.redact import redact
 from agent_archive.topics import TOPICS
 
@@ -8,7 +9,29 @@ MAX_PROMPT_CHARS = 12000
 VALUE_MIN = 2
 MAX_ATTEMPTS = 3
 
+# 整条丢弃：这些 prose 消息整体是系统/工具注入，没有用户正文。
+# 注意：harness 把它们注入到任意位置（实测 caveat 在 seq 54/1447），不止首条。
 _SYS_OPENERS = ("You are running as", "The following is the Codex", "<local-command-caveat")
+
+# 块内剥离：Codex/Claude 以 XML 块注入环境上下文/指令到用户消息里，可能与真实正文
+# 混在同一条 prose（如 <environment_context> 含 cwd/shell/OS）。只剥这份白名单里的
+# 已知注入标签，避免误删用户正文里正常出现的 <div>/<T> 等尖括号内容。
+_INJECT_TAGS = ("environment_context", "user_instructions", "app_state",
+                "INSTRUCTIONS", "local-command-caveat")
+_INJECT_RE = re.compile(
+    r"<(" + "|".join(_INJECT_TAGS) + r")\b[^>]*>.*?</\1>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _is_sys_message(text: str) -> bool:
+    t = text.lstrip()
+    return any(t.startswith(p) for p in _SYS_OPENERS)
+
+
+def _strip_injections(text: str) -> str:
+    """剥离嵌在用户消息里的已知注入块，保留其余正文。"""
+    return _INJECT_RE.sub("", text)
 
 
 def _native_id(conv_id: str) -> str:
@@ -51,9 +74,12 @@ def build_prompt(conn, conv_id: str):
     rows = conn.execute("SELECT role, text FROM messages "
                         "WHERE conv_id=? AND kind='prose' ORDER BY seq", (conv_id,)).fetchall()
     parts = []
-    for i, r in enumerate(rows):
+    for r in rows:
         txt = r["text"] or ""
-        if i == 0 and any(txt.lstrip().startswith(p) for p in _SYS_OPENERS):
+        if _is_sys_message(txt):
+            continue
+        txt = _strip_injections(txt).strip()
+        if not txt:
             continue
         parts.append(f'{r["role"]}: {txt}')
     body = "\n\n".join(parts)

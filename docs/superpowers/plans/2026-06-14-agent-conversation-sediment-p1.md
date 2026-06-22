@@ -333,8 +333,8 @@ git commit -m "feat: Collector 协议与源注册表（claude/codex 占位）"
 `tests/fixtures/claude_sample.jsonl`（每行一个 JSON；含噪声行、user 字符串 content、assistant 多 block、sidechain）：
 ```jsonl
 {"type":"queue-operation","operation":"enqueue","sessionId":"sess1"}
-{"type":"user","message":{"role":"user","content":"帮我写个脚本"},"timestamp":"2026-06-14T07:12:19.891Z","cwd":"/Users/mac/Desktop/房间渲染","sessionId":"sess1"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先看下目录"},{"type":"text","text":"好的，我来写"},{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]},"timestamp":"2026-06-14T07:12:25.000Z","cwd":"/Users/mac/Desktop/房间渲染","sessionId":"sess1"}
+{"type":"user","message":{"role":"user","content":"帮我写个脚本"},"timestamp":"2026-06-14T07:12:19.891Z","cwd":"/home/dev/demo-project","sessionId":"sess1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"先看下目录"},{"type":"text","text":"好的，我来写"},{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]},"timestamp":"2026-06-14T07:12:25.000Z","cwd":"/home/dev/demo-project","sessionId":"sess1"}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"total 0"}]},"timestamp":"2026-06-14T07:12:26.000Z","sessionId":"sess1"}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"写好了"}]},"timestamp":"2026-06-14T07:12:30.000Z","isSidechain":true,"sessionId":"sess1"}
 ```
@@ -366,7 +366,7 @@ def test_parse_builds_conversation(tmp_path):
     c, refs = _ref(tmp_path)
     conv = c.parse(refs[0])
     assert conv.id == "claude:sess1"
-    assert conv.project == "/Users/mac/Desktop/房间渲染"
+    assert conv.project == "/home/dev/demo-project"
     assert conv.title == "帮我写个脚本"          # 首条 user 正文
     assert conv.started_at == "2026-06-14T07:12:19.891Z"
     assert conv.updated_at == "2026-06-14T07:12:30.000Z"
@@ -514,7 +514,7 @@ git commit -m "feat: ClaudeCollector discover/parse（block 归一、sidechain/t
 
 `tests/fixtures/codex_sample.jsonl`（含 session_meta、用户/助手正文、噪声 developer message、加密 reasoning、function_call、以及会重复历史的 compacted）：
 ```jsonl
-{"type":"session_meta","payload":{"id":"019e060b-1e4c-79a3-b534-9e4cc5dc2450","timestamp":"2026-05-08T05:24:12.492Z","cwd":"/Users/mac/Documents/New project 3"}}
+{"type":"session_meta","payload":{"id":"019e060b-1e4c-79a3-b534-9e4cc5dc2450","timestamp":"2026-05-08T05:24:12.492Z","cwd":"/home/dev/demo-project"}}
 {"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions> ..."}]}}
 {"type":"event_msg","payload":{"type":"user_message","message":"帮我核对快团团订单"}}
 {"type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"gAAAA..."}}
@@ -575,7 +575,7 @@ def test_function_call_becomes_tool(tmp_path):
 
 def test_project_from_meta(tmp_path):
     c, refs = _setup(tmp_path)
-    assert c.parse(refs[0]).project == "/Users/mac/Documents/New project 3"
+    assert c.parse(refs[0]).project == "/home/dev/demo-project"
 ```
 
 - [ ] **Step 3: 跑测试确认失败**

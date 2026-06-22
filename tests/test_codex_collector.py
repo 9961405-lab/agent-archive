@@ -44,4 +44,4 @@ def test_function_call_becomes_tool(tmp_path):
 
 def test_project_from_meta(tmp_path):
     c, refs = _setup(tmp_path)
-    assert c.parse(refs[0]).project == "/Users/mac/Documents/New project 3"
+    assert c.parse(refs[0]).project == "/home/dev/demo-project"
