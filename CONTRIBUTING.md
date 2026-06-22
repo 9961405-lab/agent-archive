@@ -5,7 +5,7 @@
 ## 开发环境
 
     python3 -m venv .venv
-    .venv/bin/python -m pip install -e ".[mcp]"
+    .venv/bin/python -m pip install -e ".[mcp,test]"
     .venv/bin/python -m pytest -q          # 跑测试（应全绿）
 
 ## 约定

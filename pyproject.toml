@@ -25,6 +25,7 @@ Issues = "https://github.com/9961405-lab/agent-archive/issues"
 
 [project.optional-dependencies]
 mcp = ["mcp[cli]>=1.2"]
+test = ["pytest>=7"]
 
 [project.scripts]
 agent-archive = "agent_archive.cli:main"

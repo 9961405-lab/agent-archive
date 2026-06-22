@@ -19,6 +19,6 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[mcp]"
+          pip install -e ".[mcp,test]"
       - name: Test
         run: python -m pytest -q
