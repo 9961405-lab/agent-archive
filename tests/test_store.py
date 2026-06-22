@@ -84,3 +84,9 @@ def test_connect_creates_missing_parent_dir(tmp_path):
     conn = store.connect(str(db)); store.init_db(conn)
     assert db.parent.is_dir()
     assert store.list_conversations(conn) == []
+
+
+def test_segment_covers_cjk_kana_hangul_fullwidth():
+    from agent_archive.store import _segment
+    for ch in ("中", "あ", "한", "！"):
+        assert f" {ch} " in _segment(f"x{ch}y")   # 逐字加空格 → 可子串检索

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from functools import cached_property
 import hashlib
 
 
@@ -36,8 +37,9 @@ class Conversation:
     def message_count(self) -> int:
         return len(self.messages)
 
-    @property
+    @cached_property
     def content_hash(self) -> str:
+        # parse 后 messages 不再变，缓存避免 sync 里重复 O(n) 重算 SHA256
         h = hashlib.sha256()
         for m in self.messages:
             if m.kind == "prose":
