@@ -62,6 +62,35 @@ def test_sync_isolates_bad_file(tmp_path):
     assert store.manifest_get(conn, "claude", str(bad)) is None      # 坏文件不入 manifest，下次重试
     assert store.manifest_get(conn, "claude", str(good)) is not None
 
+class _NoneThenCleanupCollector:
+    """首轮把会话入库，次轮 parse 返回 None（模拟 collector 改判为非对话）。"""
+    source = "codex"
+    def __init__(self, path, return_none):
+        self._path = path; self._none = return_none
+    def discover(self):
+        st = os.stat(self._path)
+        yield SessionRef("codex", "approval-x", self._path, st.st_mtime, st.st_size)
+    def parse(self, ref):
+        if self._none:
+            return None
+        return Conversation("codex:approval-x", "codex", "会话", "/p",
+            "2026-06-14T01:00:00Z", "2026-06-14T01:00:00Z",
+            [Message("user", "正文内容够长够长够长", "t")], "")
+
+def test_sync_none_conv_cleans_existing(tmp_path):
+    f = tmp_path / "s.jsonl"; f.write_text("{}", encoding="utf-8")
+    root = tmp_path / "archive"
+    # 首轮入库
+    assert sync.sync(str(root), collectors=[_NoneThenCleanupCollector(str(f), False)])["synced"] == 1
+    conn = store.connect(str(root / "index.sqlite"))
+    assert "codex:approval-x" in store.all_conversation_ids(conn)
+    # 次轮 parse→None：应清除会话并计为 skipped（强制 full 以重新解析）
+    res = sync.sync(str(root), collectors=[_NoneThenCleanupCollector(str(f), True)], full=True)
+    assert res["skipped"] == 1 and res["synced"] == 0
+    conn2 = store.connect(str(root / "index.sqlite"))
+    assert "codex:approval-x" not in store.all_conversation_ids(conn2)
+
+
 def test_md_path_uses_mtime_when_no_started_at(tmp_path):
     path = sync._md_path("/root",
         Conversation("claude:x", "claude", "t", None, None, None, [], ""),

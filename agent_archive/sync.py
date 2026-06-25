@@ -37,6 +37,20 @@ def sync(archive_root: str, collectors, full: bool = False) -> dict:
                 continue
             try:
                 conv = col.parse(ref)
+                if conv is None:
+                    # collector 判定为非对话（如 Codex 授权评审 session）：不入库。
+                    # 若历史曾入库则连同精华卡一起清除，并记 manifest 以便后续快速跳过。
+                    cid = f"{ref.source}:{ref.native_id}"
+                    raw_ref, md_ref = store.delete_conversation(conn, cid)
+                    for rel in (md_ref, raw_ref):
+                        if rel:
+                            try:
+                                os.remove(os.path.join(archive_root, rel))
+                            except OSError:
+                                pass
+                    store.manifest_set(conn, ref.source, ref.path, ref.mtime, ref.size, "", now)
+                    skipped += 1
+                    continue
                 conv.raw_ref = mirror_mod.mirror(ref, archive_root, prefer_hardlink=prefer_hl)
                 fallback_day = datetime.date.fromtimestamp(ref.mtime).isoformat()
                 md_path = _md_path(archive_root, conv, fallback_day)

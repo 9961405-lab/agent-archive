@@ -1,7 +1,17 @@
 import os
-from agent_archive.collectors.codex import CodexCollector
+from agent_archive.collectors.codex import CodexCollector, _is_approval_json
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+def test_is_approval_json():
+    assert _is_approval_json('{"outcome":"allow"}')
+    assert _is_approval_json('  {"outcome":"deny","risk_level":"high","rationale":"x"}')
+    # 不误伤正常正文
+    assert not _is_approval_json('我觉得 {"outcome":"allow"} 这种结构怎么写')
+    assert not _is_approval_json('{"result": "ok"}')
+    assert not _is_approval_json('{"outcome": 不是合法JSON')
+    assert not _is_approval_json("")
 
 def _setup(tmp_path):
     sub = tmp_path / "2026" / "05" / "08"
@@ -45,3 +55,20 @@ def test_function_call_becomes_tool(tmp_path):
 def test_project_from_meta(tmp_path):
     c, refs = _setup(tmp_path)
     assert c.parse(refs[0]).project == "/home/dev/demo-project"
+
+
+def _setup_approval(tmp_path):
+    sub = tmp_path / "2026" / "05" / "09"; sub.mkdir(parents=True)
+    name = "rollout-2026-05-09T01-00-00-019e1124-approval-demo.jsonl"
+    (sub / name).write_text(
+        open(os.path.join(FIX, "codex_approval_session.jsonl"), encoding="utf-8").read(),
+        encoding="utf-8")
+    c = CodexCollector(root=str(tmp_path), index_path=str(tmp_path / "none.jsonl"))
+    return c, list(c.discover())
+
+
+def test_approval_session_parses_to_none(tmp_path):
+    # 整条授权评审 session 不是对话，parse 应返回 None（由 sync 跳过）
+    c, refs = _setup_approval(tmp_path)
+    assert len(refs) == 1
+    assert c.parse(refs[0]) is None

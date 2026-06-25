@@ -30,7 +30,8 @@ def build_digest(conn, period: str = "day", date: str | None = None) -> str:
     ids = [r["id"] for r in convs]
     ph = ",".join("?" * len(ids))
     dists = [dict(r) for r in conn.execute(
-        f"SELECT * FROM distillations WHERE status='ok' AND conv_id IN ({ph})", ids).fetchall()]
+        f"SELECT d.*, c.started_at FROM distillations d JOIN conversations c ON c.id=d.conv_id "
+        f"WHERE d.status='ok' AND d.conv_id IN ({ph})", ids).fetchall()]
 
     lines = [head, "", f"**{len(convs)} 个会话**（{src_line}）｜ **{len(dists)} 篇已提炼精华**", ""]
 
@@ -44,9 +45,10 @@ def build_digest(conn, period: str = "day", date: str | None = None) -> str:
         lines.append("　".join(f"{t}×{n}" for t, n in topics.most_common()))
         lines.append("")
 
-    # 重点（按价值分取高分会话的一句话总结）
+    # 重点（按价值分取高分会话的一句话总结；同分取较新的，避免排序无意义）
     top = sorted([d for d in dists if d.get("summary")],
-                 key=lambda d: d.get("value") or 0, reverse=True)[:8]
+                 key=lambda d: (d.get("value") or 0, d.get("started_at") or ""),
+                 reverse=True)[:8]
     if top:
         lines.append("## 重点")
         for d in top:

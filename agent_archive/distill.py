@@ -6,6 +6,7 @@ from agent_archive.topics import TOPICS
 PROMPT_VERSION = "distill-v1"
 PROSE_MIN_CHARS = 200
 MAX_PROMPT_CHARS = 12000
+PER_MSG_CHARS = 2000          # 单条消息上限：避免一段粘贴的日志/文件吃光整个预算
 VALUE_MIN = 2
 MAX_ATTEMPTS = 3
 
@@ -36,6 +37,35 @@ def _strip_injections(text: str) -> str:
 
 def _native_id(conv_id: str) -> str:
     return conv_id.split(":", 1)[-1]
+
+
+def _cap(txt: str) -> str:
+    """把单条消息压到 PER_MSG_CHARS 以内：留头 3/4 + 尾 1/4，中间挖空。
+    粘贴的日志/文件多半开头有上下文、结尾有结论，中段是重复噪声。"""
+    if len(txt) <= PER_MSG_CHARS:
+        return txt
+    head = PER_MSG_CHARS * 3 // 4
+    tail = PER_MSG_CHARS - head - 8
+    return txt[:head] + " …[略]… " + txt[-tail:]
+
+
+def _fit(parts: list[str], budget: int) -> str:
+    """把已逐条压缩的消息装进预算：仍超则从两端向中间贪心收纳、丢中段消息，
+    保留对话首尾的「意图—结论」弧，而不是把字符流拦腰截断丢掉中间的实质内容。"""
+    body = "\n\n".join(parts)
+    if len(body) <= budget or len(parts) <= 2:
+        return body
+    head, tail = [], []
+    size = len("\n\n…[中间省略]…\n\n")
+    i, j = 0, len(parts) - 1
+    while i < j:
+        a, b = parts[i], parts[j]
+        if size + len(a) + len(b) + 4 > budget:
+            break
+        head.append(a); tail.append(b)
+        size += len(a) + len(b) + 4
+        i += 1; j -= 1
+    return "\n\n".join(head + ["…[中间省略]…"] + list(reversed(tail)))
 
 
 def select_candidates(conn, model: str = "", prompt_version: str = PROMPT_VERSION,
@@ -81,11 +111,8 @@ def build_prompt(conn, conv_id: str):
         txt = _strip_injections(txt).strip()
         if not txt:
             continue
-        parts.append(f'{r["role"]}: {txt}')
-    body = "\n\n".join(parts)
-    if len(body) > MAX_PROMPT_CHARS:
-        half = MAX_PROMPT_CHARS // 2
-        body = body[:half] + "\n…[中间省略]…\n" + body[-half:]
+        parts.append(f'{r["role"]}: {_cap(txt)}')
+    body = _fit(parts, MAX_PROMPT_CHARS)
     body = redact(body)
     system = (
         "你是知识整理助手。阅读一段我与 AI 的对话，提炼成结构化 JSON。"
