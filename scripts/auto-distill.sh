@@ -15,3 +15,5 @@ cd "$HOME/agent-archive"
 export AGENT_ARCHIVE_ROOT="${AGENT_ARCHIVE_ROOT:-$HOME/agent-archive-data}"
 .venv/bin/python -m agent_archive.cli distill --yes
 .venv/bin/python -m agent_archive.cli topics
+# 提炼「明天要做」写入 tomorrow.md，供 21:00 的日报附带（外发同一 LLM）
+.venv/bin/python -m agent_archive.cli plan --yes
