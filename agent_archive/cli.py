@@ -6,7 +6,8 @@ from agent_archive import distill as distill_mod, render_distill, llm as llm_mod
 from agent_archive import digest as digest_mod
 
 
-_SOURCE_TAGS = {"claude": "🟦claude", "codex": "🟧codex ", "hermes": "🟩hermes"}
+_SOURCE_TAGS = {"claude": "🟦claude", "codex": "🟧codex ", "hermes": "🟩hermes",
+                "workbuddy": "🟪wbuddy"}
 
 
 def _fmt_row(c: dict) -> str:
