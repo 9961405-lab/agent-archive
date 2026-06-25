@@ -54,6 +54,7 @@ AGENT_ARCHIVE_ROOT=~/agent-archive-data .venv/bin/python -m agent_archive.cli se
 - **Claude Code** — `~/.claude/projects/**/*.jsonl`
 - **Codex** — `~/.codex/sessions/**/rollout-*.jsonl`（标题取自 `~/.codex/session_index.jsonl`）
 - **Hermes** — `~/.hermes/state.db`（SQLite：`sessions` + `messages` 表）
+- **WorkBuddy**（腾讯 CodeBuddy 内核）— `~/.workbuddy/projects/**/*.jsonl`（扁平事件流：message/reasoning/function_call）
 
 中文全文检索：FTS5 默认分词器把整段中文当一个 token，本项目对 CJK 逐字分词（索引与查询两端对称），所以可按任意子串（如「订单」「脚本」）搜索。
 
