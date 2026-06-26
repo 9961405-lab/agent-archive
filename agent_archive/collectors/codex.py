@@ -5,6 +5,30 @@ from agent_archive.models import SessionRef, Message, Conversation
 from agent_archive.collectors._util import title_snippet
 
 
+# Codex 沙箱在“按需批准”模式下会另起 session 让模型当审批官：user 侧是
+# “The following is the Codex agent history…(请判断该动作是否放行)”，assistant 侧
+# 全是 {"outcome":"allow/deny"} 决策。整段是控制面流水，不是真实对话，应整条丢弃。
+_APPROVAL_OPENER = "The following is the Codex agent history"
+
+
+def _is_approval_session(first_user: str) -> bool:
+    return (first_user or "").lstrip().startswith(_APPROVAL_OPENER)
+
+
+def _is_approval_json(txt: str) -> bool:
+    """Codex 的沙箱授权决策（{"outcome":"allow"/"deny",...}）会以 agent_message
+    形式落库，混进 assistant 正文、污染搜索与提炼。这是控制面噪声不是对话内容。
+    精准识别：以 {"outcome" 开头且能解析出顶层 outcome 键，才丢，避免误伤正文。"""
+    s = (txt or "").lstrip()
+    if not s.startswith('{"outcome"'):
+        return False
+    try:
+        o = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(o, dict) and "outcome" in o
+
+
 class CodexCollector:
     source = "codex"
 
@@ -46,7 +70,7 @@ class CodexCollector:
             if native_id:
                 yield SessionRef(self.source, native_id, path, st.st_mtime, st.st_size)
 
-    def parse(self, ref: SessionRef) -> Conversation:
+    def parse(self, ref: SessionRef) -> Conversation | None:
         titles = self._titles()
         messages: list[Message] = []
         project = None
@@ -84,13 +108,17 @@ class CodexCollector:
                     messages.append(Message("user", txt, None, "prose"))
                 elif pt == "agent_message":
                     txt = p.get("message", "")
+                    if _is_approval_json(txt):
+                        continue            # 沙箱授权决策，非对话正文
                     first_agent = first_agent or txt
                     last_agent = txt
                     messages.append(Message("assistant", txt, None, "prose"))
                 elif pt == "task_complete":
                     lam = p.get("last_agent_message", "")
-                    if lam and lam != last_agent:
+                    if lam and lam != last_agent and not _is_approval_json(lam):
                         messages.append(Message("assistant", lam, None, "prose"))
+        if _is_approval_session(first_user):
+            return None                  # 授权评审 session，整条不入库
         title = (titles.get(ref.native_id)
                  or title_snippet(first_user)
                  or title_snippet(first_agent)

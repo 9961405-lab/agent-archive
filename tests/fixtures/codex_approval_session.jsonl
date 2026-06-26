@@ -1,0 +1,4 @@
+{"type":"session_meta","payload":{"id":"019e1124-approval-demo","timestamp":"2026-05-09T01:00:00.000Z","cwd":"/home/dev/demo-project"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"The following is the Codex agent history whose request action you are assessing.\n\n<history>...省略...</history>\n\nShould this action be allowed?"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"{\"outcome\":\"allow\",\"risk_level\":\"low\",\"rationale\":\"routine read\"}"}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":"{\"outcome\":\"allow\"}"}}

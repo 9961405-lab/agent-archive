@@ -102,12 +102,30 @@ def test_build_prompt_keeps_user_angle_brackets(tmp_path):
     assert "<div>" in user
     assert "<T>" in user
 
-def test_build_prompt_truncates_overlong(tmp_path):
+def test_build_prompt_caps_single_overlong_message(tmp_path):
+    # 单条粘贴的超长消息：逐条压缩到 PER_MSG_CHARS，挖空中段而非丢整段。
     c = _conn(tmp_path)
     big = "甲" * (MAX_PROMPT_CHARS * 2)
     _add(c, "claude:big", [("user","prose",big),("assistant","prose","乙乙乙")])
     _, user = build_prompt(c, "claude:big")
-    assert "…[中间省略]…" in user
+    assert "…[略]…" in user                 # 单条被压缩
+    assert "乙乙乙" in user                   # 另一条完整保留
+    assert len(user) < MAX_PROMPT_CHARS      # 总量受控
+
+
+def test_build_prompt_drops_middle_messages(tmp_path):
+    # 多条消息总量超预算：保留首尾对话弧，丢中段，而不是字符流拦腰截断。
+    c = _conn(tmp_path)
+    msgs = []
+    for i in range(20):
+        role = "user" if i % 2 == 0 else "assistant"
+        msgs.append((role, "prose", f"标记{i:02d}" + "填" * 1500))
+    _add(c, "claude:many", msgs)
+    _, user = build_prompt(c, "claude:many")
+    assert "标记00" in user                   # 开头保留
+    assert "标记19" in user                   # 结尾保留
+    assert "…[中间省略]…" in user             # 中段被丢
+    assert "标记10" not in user               # 正中间确实没了
     assert len(user) < MAX_PROMPT_CHARS + 200
 
 import json

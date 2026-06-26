@@ -3,7 +3,7 @@ import os, argparse, datetime, collections
 from agent_archive import sync as sync_mod, store
 from agent_archive.collectors import get_collectors
 from agent_archive import distill as distill_mod, render_distill, llm as llm_mod
-from agent_archive import digest as digest_mod
+from agent_archive import digest as digest_mod, plan as plan_mod
 
 
 _SOURCE_TAGS = {"claude": "🟦claude", "codex": "🟧codex ", "hermes": "🟩hermes",
@@ -69,6 +69,12 @@ def main(argv=None) -> int:
     pg = sub.add_parser("digest")          # 周期总结（本地聚合，输出 Markdown）
     pg.add_argument("--period", choices=["day", "week", "month"], default="day")
     pg.add_argument("--date", default=None)
+
+    pl = sub.add_parser("plan",            # 明日计划（外发 LLM，写 tomorrow.md）
+        help="从最近待办提炼「明天要做」，写入 <root>/tomorrow.md，供日报附带")
+    pl.add_argument("--days", type=int, default=plan_mod.PLAN_DAYS)
+    pl.add_argument("--dry-run", action="store_true")
+    pl.add_argument("--yes", action="store_true")
 
     args = p.parse_args(argv)
     root = _root(args)
@@ -175,8 +181,46 @@ def main(argv=None) -> int:
         for status, n in store.distill_stats(conn).items():
             print(f"{status}: {n}")
         return 0
+    if args.cmd == "plan":
+        if args.dry_run:
+            todos = plan_mod.gather_todos(conn, days=args.days)
+            print(f"[dry-run] 最近 {args.days} 天待办 {len(todos)} 条，将外发提炼明日计划：")
+            for t in todos[:20]:
+                print(f"  - {t[:60]}")
+            return 0
+        base = os.environ.get("AGENT_ARCHIVE_LLM_BASE_URL")
+        key = os.environ.get("AGENT_ARCHIVE_LLM_API_KEY")
+        model = os.environ.get("AGENT_ARCHIVE_LLM_MODEL")
+        if not (base and key and model):
+            print("缺配置：请设 AGENT_ARCHIVE_LLM_BASE_URL / _API_KEY / _MODEL")
+            return 2
+        if not args.yes:
+            print(f"将把最近待办外发至 {base}（model={model}）提炼明日计划。加 --yes 确认。")
+            return 0
+        def complete(system, user, **kw):
+            return llm_mod.complete(system, user, base_url=base, api_key=key, model=model)
+        items = plan_mod.build_plan(conn, complete, model=model, days=args.days)
+        md = plan_mod.render_plan_md(items)
+        path = os.path.join(root, "tomorrow.md")
+        if md:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(md)
+            print("明日计划已生成：\n" + md)
+        else:
+            if os.path.exists(path):
+                os.remove(path)            # 无待办则清掉旧文件，避免日报附上过期计划
+            print("最近没有待办，未生成明日计划。")
+        return 0
     if args.cmd == "digest":
-        print(digest_mod.build_digest(conn, period=args.period, date=args.date))
+        md = digest_mod.build_digest(conn, period=args.period, date=args.date)
+        # 每日日报附上「明天要做」：tomorrow.md 必须是今天生成的，否则视为过期不附
+        path = os.path.join(root, "tomorrow.md")
+        if args.period == "day" and os.path.exists(path):
+            import time as _t
+            if _t.strftime("%Y-%m-%d", _t.localtime(os.path.getmtime(path))) == \
+               _t.strftime("%Y-%m-%d"):
+                md = md.rstrip() + "\n\n" + open(path, encoding="utf-8").read().strip() + "\n"
+        print(md)
         return 0
     return 1
 
